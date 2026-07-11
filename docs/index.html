@@ -388,13 +388,15 @@
     .tree {
       font-family: var(--mono);
       font-size: 0.82rem;
-      line-height: 1.7;
+      line-height: 1.75;
       color: var(--muted);
       background: var(--bg-card);
       border: 1px solid var(--border);
       border-radius: var(--radius);
       padding: 1rem 1.2rem;
       margin: 1rem 0;
+      white-space: pre;
+      overflow-x: auto;
     }
     .tree .dir { color: var(--amber); }
     .tree .file { color: var(--text); }
@@ -563,15 +565,13 @@
     <section id="arch">
       <h2><span class="num">02</span> 源码地图</h2>
       <p>整个项目几乎只有这些文件（外加配置）：</p>
-      <div class="tree">
-<span class="dir">src/</span>
-├── <span class="file">index.ts</span>    <span class="note"># CLI：REPL / 单次 -p</span>
-├── <span class="file">agent.ts</span>    <span class="note"># ★ Agent loop（核心）</span>
-├── <span class="file">tools.ts</span>    <span class="note"># read / write / edit / bash</span>
-├── <span class="file">llm.ts</span>      <span class="note"># OpenAI 兼容客户端（默认 xAI）</span>
-├── <span class="file">system.ts</span>   <span class="note"># 极简 system prompt</span>
-└── <span class="file">tools.test.ts</span> <span class="note"># 工具冒烟测试（无 API）</span>
-      </div>
+      <pre class="tree"><span class="dir">src/</span>
+├── <span class="file">index.ts</span>      <span class="note"># CLI：REPL / 单次 -p</span>
+├── <span class="file">agent.ts</span>      <span class="note"># ★ Agent loop（核心）</span>
+├── <span class="file">tools.ts</span>      <span class="note"># read / write / edit / bash</span>
+├── <span class="file">llm.ts</span>        <span class="note"># OpenAI 兼容客户端（默认 xAI）</span>
+├── <span class="file">system.ts</span>     <span class="note"># 极简 system prompt</span>
+└── <span class="file">tools.test.ts</span> <span class="note"># 工具冒烟测试（无 API）</span></pre>
       <div class="grid-2">
         <div class="card">
           <div class="tag">入口</div>
