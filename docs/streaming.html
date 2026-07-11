@@ -372,30 +372,38 @@
       </div>
 
       <h3>只有 1 个工具时：index 一直是 0</h3>
-      <pre><span class="c">// 时间 → 往后走；槽位始终是「第 0 个工具调用」</span>
-
-<span class="c">// 第 1 包到达：新建槽位 0，记下名字 write</span>
+      <p style="font-size:0.9rem">下面每一包都是服务器推来的真实 <code class="inline">delta</code>；灰色注释是客户端拼完后的状态。</p>
+      <pre><span class="c">// ── 第 1 包：新建槽位 0，带上工具名 ──</span>
 delta.tool_calls = [{
-  index: <span class="n">0</span>,              <span class="c">// ← 第 0 个工具（不是第 0 个包）</span>
+  index: <span class="n">0</span>,
   id: <span class="s">"call_abc"</span>,
   function: { name: <span class="s">"write"</span>, arguments: <span class="s">""</span> }
 }]
-<span class="c">// 客户端累加器: tools[0] = { name:"write", arguments:"" }</span>
+<span class="c">// 拼完后 → tools[0] = { name: "write", arguments: "" }</span>
 
-<span class="c">// 第 2 包：还是槽位 0，追加参数碎片</span>
+<span class="c">// ── 第 2 包：往同一个槽位追加 arguments 碎片 ──</span>
 delta.tool_calls = [{
   index: <span class="n">0</span>,
   function: { arguments: <span class="s">'{"path":'</span> }
 }]
-<span class="c">// tools[0].arguments = '{"path":'</span>
+<span class="c">// 拼完后 → tools[0].arguments = '{"path":'</span>
 
-<span class="c">// 第 3 包</span>
-<span class="c">// tools[0].arguments = '{"path":"hello.ts",'</span>
+<span class="c">// ── 第 3 包 ──</span>
+delta.tool_calls = [{
+  index: <span class="n">0</span>,
+  function: { arguments: <span class="s">'"hello.ts",'</span> }
+}]
+<span class="c">// 拼完后 → tools[0].arguments = '{"path":"hello.ts",'</span>
 
-<span class="c">// 第 4 包</span>
-<span class="c">// tools[0].arguments = '{"path":"hello.ts","content":"hi"}'  ← 这才完整</span>
+<span class="c">// ── 第 4 包 ──</span>
+delta.tool_calls = [{
+  index: <span class="n">0</span>,
+  function: { arguments: <span class="s">'"content":"hi"}'</span> }
+}]
+<span class="c">// 拼完后 → tools[0].arguments = '{"path":"hello.ts","content":"hi"}'  ✅ 完整</span>
 
-<span class="c">// 流结束 finish_reason = "tool_calls" → 现在才能 executeTool("write", 完整JSON)</span></pre>
+<span class="c">// 流结束 finish_reason = "tool_calls"
+// → 现在才能 executeTool("write", 完整 JSON)</span></pre>
 
       <h3>若一次并行调 2 个工具：才会出现 index 1</h3>
       <pre><span class="c">// 同一轮里模型说：先 read 再 bash（并行两个 tool_calls）</span>
