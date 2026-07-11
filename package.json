@@ -1,0 +1,26 @@
+{
+  "name": "mini-pi",
+  "version": "0.1.0",
+  "description": "Minimal Pi-like coding agent: read, write, edit, bash",
+  "type": "module",
+  "bin": {
+    "mini-pi": "./dist/index.js"
+  },
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "openai": "^4.104.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.8.0"
+  }
+}
