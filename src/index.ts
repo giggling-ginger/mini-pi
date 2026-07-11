@@ -3,17 +3,28 @@
  * mini-pi — minimal Pi-like coding agent CLI
  *
  * Usage:
- *   mini-pi                        # interactive REPL
- *   mini-pi "list ts files"        # single-shot
- *   mini-pi -p "..."               # print mode (same as single-shot)
- *   mini-pi --no-stream -p "..."   # wait for full response each turn
+ *   mini-pi                        # interactive REPL (new session)
+ *   mini-pi "list ts files"        # single-shot (saved to session)
+ *   mini-pi --continue             # resume latest session
+ *   mini-pi --resume               # pick a session
+ *   mini-pi --session <id|path>    # open specific session
+ *   mini-pi --no-session -p "..."  # ephemeral
  */
 import readline from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
+import path from "node:path";
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
 import { runAgent, type AgentEvent } from "./agent.js";
 import { loadDotEnv } from "./env.js";
 import { createClient, loadLlmConfig } from "./llm.js";
+import {
+  Session,
+  defaultSessionDir,
+  latestSession,
+  listSessions,
+  resolveSessionPath,
+  type SessionInfo,
+} from "./session.js";
 
 loadDotEnv();
 
@@ -24,35 +35,74 @@ Usage:
   mini-pi [options] [prompt...]
 
 Options:
-  -p, --print       Single-shot: run prompt and exit
-  --no-stream       Disable token streaming (wait for full reply each turn)
-  -h, --help        Show help
-  -c, --cwd DIR     Working directory (default: current)
+  -p, --print            Single-shot: run prompt and exit
+  --no-stream            Disable token streaming
+  -h, --help             Show help
+  --cwd DIR              Working directory (default: current)
 
-Env (need a real API — SuperGrok/Codex sub is not enough):
-  PROVIDER           openai | openrouter | ollama | xai
-  MODEL              model id
-  OPENAI_API_KEY     platform.openai.com key (≠ ChatGPT sub)
-  OPENROUTER_API_KEY openrouter.ai
-  OLLAMA_HOST        default http://127.0.0.1:11434
-  XAI_API_KEY        console.x.ai (≠ SuperGrok)
+Sessions (saved under .mini-pi/sessions/ as JSONL):
+  --continue             Resume the most recent session
+  --resume, -r           List sessions and pick one (or use latest if only one)
+  --session <id|path>    Open a session by id, partial id, or file path
+  --session-dir <dir>    Session directory (default: <cwd>/.mini-pi/sessions)
+  --no-session           Do not load or save a session (ephemeral)
+  --list-sessions        Print sessions and exit
+
+REPL commands:
+  /exit /quit    Quit
+  /reset         New empty session file (keeps old file on disk)
+  /session       Show current session path + id
+  /help          This help
 
 Examples:
-  PROVIDER=ollama MODEL=llama3.2 mini-pi -p "List files"
-  mini-pi "List files in src/"
-  mini-pi --no-stream -p "hi"   # compare with streaming
-  mini-pi                       # interactive
+  mini-pi -p "create hello.ts"
+  mini-pi --continue "now add a test"
+  mini-pi --resume
+  mini-pi --session 2026-07-11
+  mini-pi --no-session -p "ephemeral task"
 `.trim();
 
-function parseArgs(argv: string[]) {
+type Args = {
+  help: boolean;
+  print: boolean;
+  stream: boolean;
+  cwd: string;
+  prompt: string;
+  continueSession: boolean;
+  resume: boolean;
+  session?: string;
+  sessionDir?: string;
+  noSession: boolean;
+  listSessions: boolean;
+};
+
+function parseArgs(argv: string[]): Args {
   let print = false;
   let stream = true;
   let cwd = process.cwd();
+  let continueSession = false;
+  let resume = false;
+  let session: string | undefined;
+  let sessionDir: string | undefined;
+  let noSession = false;
+  let listSessionsFlag = false;
   const rest: string[] = [];
 
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
-    if (a === "-h" || a === "--help") return { help: true as const };
+    if (a === "-h" || a === "--help") {
+      return {
+        help: true,
+        print: false,
+        stream: true,
+        cwd,
+        prompt: "",
+        continueSession: false,
+        resume: false,
+        noSession: false,
+        listSessions: false,
+      };
+    }
     if (a === "-p" || a === "--print") {
       print = true;
       continue;
@@ -61,8 +111,38 @@ function parseArgs(argv: string[]) {
       stream = false;
       continue;
     }
-    if (a === "-c" || a === "--cwd") {
+    if (a === "--cwd") {
       cwd = argv[++i] ?? cwd;
+      continue;
+    }
+    // keep -c as alias for --cwd? was old behavior; document --continue separately
+    if (a === "-c") {
+      // Prefer Pi-style: -c means continue. cwd uses --cwd only.
+      continueSession = true;
+      continue;
+    }
+    if (a === "--continue") {
+      continueSession = true;
+      continue;
+    }
+    if (a === "--resume" || a === "-r") {
+      resume = true;
+      continue;
+    }
+    if (a === "--session") {
+      session = argv[++i];
+      continue;
+    }
+    if (a === "--session-dir") {
+      sessionDir = argv[++i];
+      continue;
+    }
+    if (a === "--no-session") {
+      noSession = true;
+      continue;
+    }
+    if (a === "--list-sessions") {
+      listSessionsFlag = true;
       continue;
     }
     if (a.startsWith("-")) {
@@ -72,26 +152,32 @@ function parseArgs(argv: string[]) {
     rest.push(a);
   }
 
-  return { help: false as const, print, stream, cwd, prompt: rest.join(" ").trim() };
+  return {
+    help: false,
+    print,
+    stream,
+    cwd,
+    prompt: rest.join(" ").trim(),
+    continueSession,
+    resume,
+    session,
+    sessionDir,
+    noSession,
+    listSessions: listSessionsFlag,
+  };
 }
 
-/** Track whether we already printed a newline after streaming text. */
 function createEventPrinter() {
   let inTextStream = false;
-  let toolArgsPreview = "";
 
   return function formatEvent(event: AgentEvent): void {
     switch (event.type) {
       case "text_delta":
-        if (!inTextStream) {
-          // leave tool lines above, start assistant text
-          inTextStream = true;
-        }
+        inTextStream = true;
         process.stdout.write(event.text);
         break;
 
       case "text":
-        // full text already printed via deltas (or one-shot in --no-stream)
         if (inTextStream) {
           if (!event.text.endsWith("\n")) process.stdout.write("\n");
           inTextStream = false;
@@ -99,9 +185,6 @@ function createEventPrinter() {
         break;
 
       case "tool_call_delta":
-        // Quiet by default — args JSON is noisy. Uncomment for debug:
-        // process.stderr.write(event.argsDelta ?? event.name ?? "");
-        if (event.argsDelta) toolArgsPreview += event.argsDelta;
         break;
 
       case "tool_call": {
@@ -117,7 +200,6 @@ function createEventPrinter() {
         }
         if (preview.length > 200) preview = preview.slice(0, 200) + "…";
         console.log(`\x1b[36m→ ${event.name}\x1b[0m ${preview}`);
-        toolArgsPreview = "";
         break;
       }
 
@@ -145,6 +227,94 @@ function indent(s: string): string {
     .join("\n");
 }
 
+function formatSessionList(sessions: SessionInfo[]): string {
+  if (sessions.length === 0) return "(no sessions yet)";
+  return sessions
+    .map((s, i) => {
+      const when = s.updatedAt ? s.updatedAt.slice(0, 19).replace("T", " ") : "?";
+      return (
+        `  [${i + 1}] ${s.id}\n` +
+        `      ${when}  msgs=${s.messageCount}  ${s.title}`
+      );
+    })
+    .join("\n");
+}
+
+async function pickSession(
+  sessions: SessionInfo[],
+  rl: readline.Interface,
+): Promise<SessionInfo | null> {
+  if (sessions.length === 0) {
+    console.log("No sessions found.");
+    return null;
+  }
+  if (sessions.length === 1) {
+    console.log(`Only one session — using ${sessions[0].id}`);
+    return sessions[0];
+  }
+  console.log("Sessions (most recent first):\n");
+  console.log(formatSessionList(sessions));
+  console.log();
+  const answer = (await rl.question("Pick number (or empty to cancel): ")).trim();
+  if (!answer) return null;
+  const n = Number(answer);
+  if (!Number.isInteger(n) || n < 1 || n > sessions.length) {
+    console.error("Invalid selection.");
+    return null;
+  }
+  return sessions[n - 1];
+}
+
+async function openSession(args: Args, config: { model: string; provider: string }): Promise<Session | null> {
+  if (args.noSession) return null;
+
+  const sessionDir = args.sessionDir
+    ? path.resolve(args.sessionDir)
+    : defaultSessionDir(args.cwd);
+
+  if (args.session) {
+    const p = resolveSessionPath(args.session, sessionDir);
+    return Session.load(p);
+  }
+
+  if (args.continueSession) {
+    const latest = latestSession(sessionDir);
+    if (!latest) {
+      console.error(`No session to continue in ${sessionDir}`);
+      console.error("Starting a new session instead.");
+      return Session.create({
+        sessionDir,
+        cwd: args.cwd,
+        model: config.model,
+        provider: config.provider,
+      });
+    }
+    return Session.load(latest.path);
+  }
+
+  if (args.resume) {
+    const sessions = listSessions(sessionDir);
+    const rl = readline.createInterface({ input, output, terminal: true });
+    try {
+      const picked = await pickSession(sessions, rl);
+      if (!picked) {
+        process.exit(0);
+      }
+      return Session.load(picked.path);
+    } finally {
+      rl.close();
+    }
+  }
+
+  // Default: brand-new session for this run
+  return Session.create({
+    sessionDir,
+    cwd: args.cwd,
+    model: config.model,
+    provider: config.provider,
+  });
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (args.help) {
@@ -152,13 +322,38 @@ async function main() {
     return;
   }
 
+  const sessionDir = args.sessionDir
+    ? path.resolve(args.sessionDir)
+    : defaultSessionDir(args.cwd);
+
+  if (args.listSessions) {
+    console.log(`Sessions in ${sessionDir}\n`);
+    console.log(formatSessionList(listSessions(sessionDir)));
+    return;
+  }
+
   const config = loadLlmConfig();
   const client = createClient(config);
   const cwd = args.cwd;
 
+  let session = await openSession(args, {
+    model: config.model,
+    provider: config.provider,
+  });
+
+  const sessionLabel = session
+    ? `session=${session.id}`
+    : "session=off";
+
   console.error(
-    `mini-pi  provider=${config.provider}  model=${config.model}  stream=${args.stream}  cwd=${cwd}`,
+    `mini-pi  provider=${config.provider}  model=${config.model}  stream=${args.stream}  ${sessionLabel}  cwd=${cwd}`,
   );
+  if (session) {
+    console.error(`  file ${session.path}`);
+    if (session.history.length > 0) {
+      console.error(`  resumed ${session.history.length} messages · ${session.title}`);
+    }
+  }
 
   const agentOpts = {
     client,
@@ -168,23 +363,30 @@ async function main() {
     onEvent: createEventPrinter(),
   };
 
+  let history: ChatCompletionMessageParam[] = session?.history ?? [];
+
+  async function runTurn(prompt: string): Promise<void> {
+    const opts = { ...agentOpts, onEvent: createEventPrinter() };
+    history = await runAgent(opts, prompt, history);
+    session?.syncFromHistory(history);
+  }
+
   // Single-shot
   if (args.print || args.prompt) {
     if (!args.prompt) {
       console.error("No prompt provided.");
       process.exit(1);
     }
-    await runAgent(agentOpts, args.prompt);
+    await runTurn(args.prompt);
     return;
   }
 
   // Interactive REPL
   const rl = readline.createInterface({ input, output, terminal: true });
-  let history: ChatCompletionMessageParam[] = [];
 
   console.log(
-    "Type a task (empty or /exit to quit, /reset to clear history).\n" +
-      "Tokens stream as they arrive (use --no-stream to disable).\n",
+    "Type a task (empty or /exit to quit).\n" +
+      "Sessions auto-save to .mini-pi/sessions/  ·  /session  /reset  /help\n",
   );
 
   while (true) {
@@ -196,20 +398,44 @@ async function main() {
     }
 
     if (!line || line === "/exit" || line === "/quit") break;
+
     if (line === "/reset") {
-      history = [];
-      console.log("(history cleared)");
+      if (args.noSession) {
+        history = [];
+        console.log("(history cleared, no session file)");
+      } else {
+        session = Session.create({
+          sessionDir,
+          cwd: args.cwd,
+          model: config.model,
+          provider: config.provider,
+        });
+        history = [];
+        console.log(`(new session ${session.id})`);
+        console.error(`  file ${session.path}`);
+      }
       continue;
     }
+
+    if (line === "/session") {
+      if (!session) {
+        console.log("session: off (--no-session)");
+      } else {
+        console.log(`id:    ${session.id}`);
+        console.log(`file:  ${session.path}`);
+        console.log(`title: ${session.title}`);
+        console.log(`msgs:  ${history.length}`);
+      }
+      continue;
+    }
+
     if (line === "/help") {
       console.log(HELP);
       continue;
     }
 
     try {
-      // fresh printer each turn so stream state resets
-      const opts = { ...agentOpts, onEvent: createEventPrinter() };
-      history = await runAgent(opts, line, history);
+      await runTurn(line);
     } catch (err) {
       console.error("Error:", err instanceof Error ? err.message : err);
     }
@@ -217,6 +443,9 @@ async function main() {
   }
 
   rl.close();
+  if (session) {
+    console.error(`\nsession saved: ${session.path}`);
+  }
 }
 
 main().catch((err) => {

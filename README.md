@@ -116,13 +116,39 @@ This is the entire core of almost every coding agent.
 | edit  | Exact string replace (like Pi / Claude Code)      |
 | bash  | Run shell command in workspace                    |
 
-## REPL commands
+## Sessions
 
-| Command  | Action              |
-|----------|----------------------|
-| `/exit`  | Quit                 |
-| `/reset` | Clear chat history   |
-| `/help`  | Show help            |
+Conversations are saved as **JSONL** under `.mini-pi/sessions/` (gitignored).
+
+```bash
+# new session (default)
+npm run dev -- -p "create hello.ts"
+
+# continue last session with a follow-up
+npm run dev -- --continue -p "now add a test"
+# short flag: -c
+
+# pick a session interactively
+npm run dev -- --resume
+
+# open by id / partial id / path
+npm run dev -- --session 2026-07-11
+
+# list
+npm run dev -- --list-sessions
+
+# don't save
+npm run dev -- --no-session -p "ephemeral"
+```
+
+Each file starts with a `meta` line, then one JSON object per message (`user` / `assistant` / `tool`). Reload reconstructs the same `messages[]` the agent loop uses.
+
+| REPL     | Action                                      |
+|----------|---------------------------------------------|
+| `/session` | Show id + path                            |
+| `/reset`   | Start a **new** session file (old kept)   |
+| `/exit`    | Quit                                      |
+| `/help`    | Help                                      |
 
 ## Streaming
 
@@ -137,20 +163,18 @@ How it works (wire diagram + interactive demo): **[docs/streaming.html](./docs/s
 
 ## What this intentionally does **not** have
 
-- Session files / resume
 - Permissions / sandbox
 - Extensions / skills / MCP
 - Subagents / plan mode
 - Rich TUI
-
-Add those later if you want — starting minimal is the point.
+- Session trees / branch (Pi has these; we keep a linear JSONL)
 
 ## Next steps (if you extend it)
 
-1. **Session JSONL** — save messages to disk, `--continue`
-2. **AGENTS.md** — inject project instructions into system prompt
-3. **Extensions** — load extra tools from `~/.mini-pi/extensions/`
-4. **Context compaction** — summarize old turns when near context limit
+1. **AGENTS.md** — inject project instructions into system prompt
+2. **Extensions** — load extra tools from `~/.mini-pi/extensions/`
+3. **Context compaction** — summarize old turns when near context limit
+4. **Session branch/tree** — fork a session like Pi
 
 ## License
 
