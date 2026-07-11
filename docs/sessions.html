@@ -1,0 +1,690 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Sessions 原理 · mini-pi</title>
+  <meta name="description" content="讲解 mini-pi 如何用 JSONL 把 agent 对话存盘、续聊与 resume" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #0c0e12;
+      --bg-elev: #13161d;
+      --bg-card: #171b24;
+      --border: #2a3140;
+      --text: #e8ecf4;
+      --muted: #8b95a8;
+      --faint: #5c667a;
+      --accent: #6ee7b7;
+      --cyan: #67e8f9;
+      --amber: #fbbf24;
+      --rose: #fb7185;
+      --violet: #a78bfa;
+      --blue: #60a5fa;
+      --radius: 12px;
+      --max: 820px;
+      --font: "IBM Plex Sans", system-ui, sans-serif;
+      --mono: "IBM Plex Mono", ui-monospace, monospace;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: var(--font);
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.65;
+      font-size: 16.5px;
+      -webkit-font-smoothing: antialiased;
+    }
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(167, 139, 250, 0.035) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(167, 139, 250, 0.035) 1px, transparent 1px);
+      background-size: 48px 48px;
+      pointer-events: none;
+      z-index: 0;
+      mask-image: radial-gradient(ellipse 80% 50% at 50% 0%, black, transparent);
+    }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .wrap { position: relative; z-index: 1; max-width: var(--max); margin: 0 auto; padding: 0 1.25rem 5rem; }
+
+    nav {
+      position: sticky; top: 0; z-index: 50;
+      backdrop-filter: blur(12px);
+      background: rgba(12, 14, 18, 0.85);
+      border-bottom: 1px solid var(--border);
+      margin: 0 -1.25rem;
+      padding: 0.75rem 1.25rem;
+    }
+    nav .inner {
+      max-width: var(--max); margin: 0 auto;
+      display: flex; align-items: center; gap: 1rem;
+      flex-wrap: wrap; justify-content: space-between;
+    }
+    nav .brand {
+      font-family: var(--mono); font-weight: 600; font-size: 0.95rem; color: var(--text);
+    }
+    nav .brand span { color: var(--violet); }
+    nav .links { display: flex; gap: 0.25rem 1rem; flex-wrap: wrap; font-size: 0.85rem; }
+    nav .links a { color: var(--muted); }
+    nav .links a:hover { color: var(--text); text-decoration: none; }
+
+    header.hero { padding: 3rem 0 2rem; }
+    .badge {
+      display: inline-flex; gap: 0.4rem;
+      font-family: var(--mono); font-size: 0.72rem; font-weight: 500;
+      letter-spacing: 0.04em; text-transform: uppercase;
+      color: var(--violet); background: rgba(167, 139, 250, 0.12);
+      border: 1px solid rgba(167, 139, 250, 0.3);
+      padding: 0.3rem 0.65rem; border-radius: 999px; margin-bottom: 1.15rem;
+    }
+    h1 {
+      font-size: clamp(1.75rem, 5vw, 2.4rem);
+      font-weight: 700; letter-spacing: -0.03em; line-height: 1.2; margin-bottom: 1rem;
+    }
+    h1 em { font-style: normal; color: var(--violet); }
+    .lead { font-size: 1.08rem; color: var(--muted); max-width: 40em; margin-bottom: 1rem; }
+
+    section { margin-top: 3rem; scroll-margin-top: 4rem; }
+    h2 {
+      font-size: 1.3rem; font-weight: 700; letter-spacing: -0.02em;
+      margin-bottom: 0.85rem; display: flex; align-items: baseline; gap: 0.6rem;
+    }
+    h2 .num { font-family: var(--mono); font-size: 0.8rem; color: var(--violet); font-weight: 600; }
+    h3 { font-size: 1.05rem; font-weight: 600; margin: 1.4rem 0 0.55rem; }
+    p { margin-bottom: 0.85rem; color: var(--muted); }
+    p strong, li strong { color: var(--text); font-weight: 600; }
+
+    ul.plain { list-style: none; margin: 0.75rem 0 1rem; }
+    ul.plain li {
+      position: relative; padding-left: 1.2rem; margin-bottom: 0.4rem; color: var(--muted);
+    }
+    ul.plain li::before {
+      content: "→"; position: absolute; left: 0; color: var(--violet);
+      font-family: var(--mono); font-size: 0.85rem;
+    }
+
+    .grid-2 {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 0.85rem; margin: 1rem 0;
+    }
+    @media (max-width: 640px) { .grid-2 { grid-template-columns: 1fr; } }
+    .card {
+      background: var(--bg-card); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 1.1rem 1.15rem;
+    }
+    .card h4 {
+      font-family: var(--mono); font-size: 0.88rem; font-weight: 600;
+      margin-bottom: 0.4rem; color: var(--text);
+    }
+    .card p { font-size: 0.9rem; margin-bottom: 0; }
+
+    .callout {
+      background: linear-gradient(135deg, rgba(167, 139, 250, 0.1), rgba(110, 231, 183, 0.05));
+      border: 1px solid rgba(167, 139, 250, 0.25);
+      border-radius: var(--radius); padding: 1rem 1.15rem; margin: 1.15rem 0;
+      font-size: 0.95rem; color: var(--muted);
+    }
+    .callout strong { color: var(--violet); }
+
+    pre, code { font-family: var(--mono); }
+    pre {
+      background: #0a0c10; border: 1px solid var(--border); border-radius: var(--radius);
+      padding: 1rem 1.1rem; overflow-x: auto; font-size: 0.78rem; line-height: 1.55;
+      margin: 0.85rem 0 1.1rem; color: #c8d0e0;
+    }
+    pre .c { color: #5c667a; }
+    pre .k { color: #c4b5fd; }
+    pre .s { color: #6ee7b7; }
+    pre .f { color: #67e8f9; }
+    pre .n { color: #fbbf24; }
+    code.inline {
+      font-size: 0.86em; background: var(--bg-card); border: 1px solid var(--border);
+      padding: 0.1em 0.35em; border-radius: 4px; color: var(--violet);
+    }
+
+    .tree {
+      font-family: var(--mono); font-size: 0.82rem; line-height: 1.75;
+      color: var(--muted); background: var(--bg-card); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 1rem 1.2rem; margin: 1rem 0;
+      white-space: pre; overflow-x: auto;
+    }
+    .tree .dir { color: var(--amber); }
+    .tree .file { color: var(--text); }
+    .tree .note { color: var(--faint); }
+
+    /* file visual */
+    .jsonl {
+      background: #0a0c10; border: 1px solid var(--border); border-radius: var(--radius);
+      overflow: hidden; margin: 1rem 0;
+    }
+    .jsonl-bar {
+      display: flex; align-items: center; gap: 0.5rem;
+      padding: 0.5rem 0.85rem; background: var(--bg-card);
+      border-bottom: 1px solid var(--border);
+      font-family: var(--mono); font-size: 0.75rem; color: var(--faint);
+    }
+    .jsonl-bar .dot {
+      width: 8px; height: 8px; border-radius: 50%; background: var(--violet);
+      box-shadow: 0 0 8px rgba(167, 139, 250, 0.6);
+    }
+    .jsonl-body {
+      padding: 0.75rem 0; max-height: 22rem; overflow-y: auto;
+      font-family: var(--mono); font-size: 0.76rem; line-height: 1.5;
+    }
+    .jsonl-line {
+      display: grid; grid-template-columns: 2.2rem 1fr; gap: 0.5rem;
+      padding: 0.28rem 0.85rem; border-left: 3px solid transparent;
+      transition: background 0.15s, border-color 0.15s;
+    }
+    .jsonl-line .ln { color: var(--faint); text-align: right; user-select: none; }
+    .jsonl-line .tx { color: var(--muted); word-break: break-all; white-space: pre-wrap; }
+    .jsonl-line.meta { border-left-color: var(--violet); }
+    .jsonl-line.meta .tx { color: #c4b5fd; }
+    .jsonl-line.user { border-left-color: var(--blue); }
+    .jsonl-line.user .tx { color: #93c5fd; }
+    .jsonl-line.assistant { border-left-color: var(--accent); }
+    .jsonl-line.assistant .tx { color: #86efac; }
+    .jsonl-line.tool { border-left-color: var(--amber); }
+    .jsonl-line.tool .tx { color: #fcd34d; }
+    .jsonl-line.flash {
+      background: rgba(167, 139, 250, 0.12);
+    }
+    .jsonl-empty {
+      padding: 1.5rem; text-align: center; color: var(--faint); font-family: var(--mono); font-size: 0.85rem;
+    }
+
+    .demo {
+      background: var(--bg-elev); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 1.15rem; margin: 1.15rem 0;
+    }
+    .demo-meta {
+      display: flex; flex-wrap: wrap; gap: 0.5rem 1rem; margin-bottom: 0.75rem;
+      font-family: var(--mono); font-size: 0.75rem; color: var(--faint);
+    }
+    .demo-meta strong { color: var(--amber); font-weight: 500; }
+    .demo-controls { display: flex; gap: 0.5rem; margin-top: 0.85rem; flex-wrap: wrap; }
+    .demo-controls button {
+      font-family: var(--mono); font-size: 0.78rem; padding: 0.4rem 0.75rem;
+      border-radius: 6px; border: 1px solid var(--border); background: var(--bg-card);
+      color: var(--muted); cursor: pointer;
+    }
+    .demo-controls button:hover { color: var(--text); border-color: var(--violet); }
+    .demo-controls button.primary {
+      background: rgba(167, 139, 250, 0.15); color: var(--violet);
+      border-color: rgba(167, 139, 250, 0.4);
+    }
+
+    .flow {
+      display: flex; flex-direction: column; gap: 0;
+      margin: 1.1rem 0; padding: 1rem; background: var(--bg-elev);
+      border: 1px solid var(--border); border-radius: var(--radius);
+    }
+    .flow-step {
+      display: grid; grid-template-columns: 2.2rem 1fr; gap: 0.75rem;
+    }
+    .flow-step .rail { display: flex; flex-direction: column; align-items: center; }
+    .flow-step .dot {
+      width: 1.75rem; height: 1.75rem; border-radius: 50%;
+      border: 1.5px solid var(--border); background: var(--bg-card);
+      color: var(--muted); font-family: var(--mono); font-size: 0.72rem; font-weight: 600;
+      display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+    }
+    .flow-step.active .dot {
+      border-color: var(--violet); color: var(--violet);
+      background: rgba(167, 139, 250, 0.15);
+      box-shadow: 0 0 0 3px rgba(167, 139, 250, 0.12);
+    }
+    .flow-step .line {
+      width: 2px; flex: 1; min-height: 1rem; background: var(--border); margin: 0.2rem 0;
+    }
+    .flow-step:last-child .line { display: none; }
+    .flow-step .body { padding-bottom: 1rem; }
+    .flow-step .body h4 { font-size: 0.92rem; margin-bottom: 0.15rem; }
+    .flow-step .body p { font-size: 0.86rem; margin: 0; }
+
+    table {
+      width: 100%; border-collapse: collapse; font-size: 0.9rem; margin: 1rem 0;
+    }
+    th, td {
+      text-align: left; padding: 0.6rem 0.7rem; border-bottom: 1px solid var(--border);
+    }
+    th {
+      font-family: var(--mono); font-size: 0.72rem; color: var(--faint);
+      text-transform: uppercase; letter-spacing: 0.04em; font-weight: 500;
+    }
+    td { color: var(--muted); }
+    td:first-child { font-family: var(--mono); color: var(--text); font-size: 0.84rem; }
+
+    footer {
+      margin-top: 4rem; padding-top: 1.5rem; border-top: 1px solid var(--border);
+      font-size: 0.85rem; color: var(--faint);
+      display: flex; flex-wrap: wrap; gap: 0.75rem 1.5rem; justify-content: space-between;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <nav>
+      <div class="inner">
+        <a class="brand" href="./index.html">mini-<span>pi</span> · sessions</a>
+        <div class="links">
+          <a href="./index.html">总览</a>
+          <a href="./streaming.html">Streaming</a>
+          <a href="#why">为什么</a>
+          <a href="#jsonl">JSONL</a>
+          <a href="#loop">和 loop</a>
+          <a href="#demo">演示</a>
+          <a href="#cli">命令</a>
+          <a href="https://github.com/giggling-ginger/mini-pi" target="_blank" rel="noopener">GitHub ↗</a>
+        </div>
+      </div>
+    </nav>
+
+    <header class="hero">
+      <div class="badge">Sessions · JSONL on disk</div>
+      <h1>对话为什么能<br /><em>关掉再续上</em></h1>
+      <p class="lead">
+        Agent 的记忆就是内存里那串 <code class="inline">messages[]</code>。
+        Session 做的事很朴素：把它<strong>一行行写到磁盘</strong>；下次启动再<strong>读回来</strong>塞进 loop。
+      </p>
+      <p class="lead" style="font-size:0.95rem">
+        对应源码：<code class="inline">src/session.ts</code> + CLI 里的 <code class="inline">--continue</code> / <code class="inline">--resume</code>。
+      </p>
+    </header>
+
+    <section id="why">
+      <h2><span class="num">01</span> 没有 session 时会发生什么</h2>
+      <div class="grid-2">
+        <div class="card">
+          <h4>只有内存</h4>
+          <p>
+            REPL 里 <code class="inline">history</code> 是个数组。进程退出 → 数组没了 →
+            模型完全不记得你刚让它写的文件上下文（当然磁盘上的代码还在）。
+          </p>
+        </div>
+        <div class="card">
+          <h4>有 session</h4>
+          <p>
+            每一轮结束后把新消息 append 进 <code class="inline">.jsonl</code>。
+            下次 <code class="inline">--continue</code> 加载 → 同一串 history → 模型接着聊。
+          </p>
+        </div>
+      </div>
+      <div class="callout">
+        <strong>Session ≠ 向量数据库 / 长期记忆。</strong>
+        它就是「把 chat messages 序列化」。简单、可 diff、人眼能读——学习 harness 刚好够用。
+      </div>
+    </section>
+
+    <section id="where">
+      <h2><span class="num">02</span> 文件放哪</h2>
+      <pre class="tree"><span class="dir">你的项目/</span>
+├── src/ ...
+└── <span class="dir">.mini-pi/</span>                 <span class="note"># gitignore 掉了</span>
+    └── <span class="dir">sessions/</span>
+        ├── <span class="file">2026-07-11T23-09-37_e497cd.jsonl</span>
+        └── <span class="file">2026-07-12T10-02-11_a1b2c3.jsonl</span></pre>
+      <ul class="plain">
+        <li>默认目录：<code class="inline">&lt;cwd&gt;/.mini-pi/sessions/</code>（跟项目走）</li>
+        <li>文件名：时间戳 + 短随机串，当作 session id</li>
+        <li><code class="inline">--session-dir</code> 可改存放位置</li>
+      </ul>
+    </section>
+
+    <section id="jsonl">
+      <h2><span class="num">03</span> JSONL 长什么样</h2>
+      <p>
+        <strong>JSONL</strong> = JSON Lines：<strong>一行一个 JSON 对象</strong>，用换行分隔。
+        适合「只往末尾追加」，崩溃了也不容易整文件写坏。
+      </p>
+      <pre><span class="c">// 第 1 行永远是 meta（会话名片）</span>
+{<span class="s">"type"</span>:<span class="s">"meta"</span>, <span class="s">"id"</span>:<span class="s">"2026-..."</span>, <span class="s">"title"</span>:<span class="s">"create hello.ts"</span>, ...}
+
+<span class="c">// 之后每一行是一条 message（和 API 里的 role 一致）</span>
+{<span class="s">"type"</span>:<span class="s">"message"</span>, <span class="s">"ts"</span>:<span class="s">"..."</span>, <span class="s">"message"</span>:{ <span class="s">"role"</span>:<span class="s">"user"</span>, <span class="s">"content"</span>:<span class="s">"..."</span> }}
+{<span class="s">"type"</span>:<span class="s">"message"</span>, <span class="s">"ts"</span>:<span class="s">"..."</span>, <span class="s">"message"</span>:{ <span class="s">"role"</span>:<span class="s">"assistant"</span>, <span class="s">"content"</span>:<span class="s">"..."</span>, <span class="s">"tool_calls"</span>:[...] }}
+{<span class="s">"type"</span>:<span class="s">"message"</span>, <span class="s">"ts"</span>:<span class="s">"..."</span>, <span class="s">"message"</span>:{ <span class="s">"role"</span>:<span class="s">"tool"</span>, <span class="s">"tool_call_id"</span>:<span class="s">"..."</span>, <span class="s">"content"</span>:<span class="s">"..."</span> }}</pre>
+
+      <div class="grid-2">
+        <div class="card">
+          <h4>会存什么</h4>
+          <p>user / assistant（含 tool_calls）/ tool 结果。这些是模型下一轮要看见的上下文。</p>
+        </div>
+        <div class="card">
+          <h4>不存什么</h4>
+          <p>
+            <strong>system prompt 不进文件</strong>——每次启动按当前 cwd 重新生成。
+            换目录、改 prompt 逻辑时更干净。
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section id="loop">
+      <h2><span class="num">04</span> 和 Agent Loop 怎么接</h2>
+      <p>Session 不改变 loop，只包在外面：</p>
+      <div class="flow" id="flow">
+        <div class="flow-step active" data-i="0">
+          <div class="rail"><div class="dot">1</div><div class="line"></div></div>
+          <div class="body">
+            <h4>打开 / 创建 session</h4>
+            <p>新会话写一行 meta；<code class="inline">--continue</code> 则 load JSONL → <code class="inline">history[]</code></p>
+          </div>
+        </div>
+        <div class="flow-step" data-i="1">
+          <div class="rail"><div class="dot">2</div><div class="line"></div></div>
+          <div class="body">
+            <h4>runAgent(prompt, history)</h4>
+            <p>内部：system + history + user → 模型 → 工具… 返回<strong>完整</strong>非 system 消息列表</p>
+          </div>
+        </div>
+        <div class="flow-step" data-i="2">
+          <div class="rail"><div class="dot">3</div><div class="line"></div></div>
+          <div class="body">
+            <h4>syncFromHistory(newHistory)</h4>
+            <p>对比旧长度，把<strong>新增的尾巴</strong> append 进 jsonl（不是整文件重写每条）</p>
+          </div>
+        </div>
+        <div class="flow-step" data-i="3">
+          <div class="rail"><div class="dot">4</div><div class="line"></div></div>
+          <div class="body">
+            <h4>下一轮 / 退出</h4>
+            <p>内存里 history 继续用；进程挂了也没关系——磁盘上已有完整记录</p>
+          </div>
+        </div>
+      </div>
+      <div class="demo-controls" style="margin-top:0">
+        <button type="button" id="flow-next" class="primary">高亮下一步</button>
+        <button type="button" id="flow-reset">重置</button>
+      </div>
+
+      <h3>核心代码心智</h3>
+      <pre><span class="c">// 启动</span>
+<span class="k">let</span> session = Session.<span class="f">create</span>(...)  <span class="c">// 或 Session.load(...)</span>
+<span class="k">let</span> history = session.history       <span class="c">// [] 或上次的 messages</span>
+
+<span class="c">// 每一轮用户输入之后</span>
+history = <span class="k">await</span> <span class="f">runAgent</span>(opts, userText, history)
+session.<span class="f">syncFromHistory</span>(history)   <span class="c">// 只把新消息 append 到磁盘</span></pre>
+      <div class="callout">
+        <strong>为什么只 append 尾巴？</strong>
+        <code class="inline">runAgent</code> 返回的是「整段对话」；session 记得自己已经有 N 条，
+        只把 <code class="inline">history.slice(N)</code> 写成新行。这样 JSONL 保持追加写，简单可靠。
+      </div>
+    </section>
+
+    <section id="demo">
+      <h2><span class="num">05</span> 交互演示：文件怎么长出来</h2>
+      <p>模拟一轮「create hello.ts」：看 jsonl 从只有 meta，到 user → assistant(tool) → tool → assistant。</p>
+      <div class="demo">
+        <div class="demo-meta">
+          <span>step: <strong id="demo-step">0</strong></span>
+          <span>phase: <strong id="demo-phase">idle</strong></span>
+          <span>lines: <strong id="demo-count">0</strong></span>
+        </div>
+        <div class="jsonl">
+          <div class="jsonl-bar">
+            <span class="dot"></span>
+            <span id="demo-fname">.mini-pi/sessions/demo.jsonl</span>
+          </div>
+          <div class="jsonl-body" id="demo-body">
+            <div class="jsonl-empty">点「播放」或「单步」开始写入…</div>
+          </div>
+        </div>
+        <div class="demo-controls">
+          <button type="button" class="primary" id="demo-play">▶ 播放</button>
+          <button type="button" id="demo-step-btn">单步</button>
+          <button type="button" id="demo-reset">重置</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="cli">
+      <h2><span class="num">06</span> 命令怎么映射到原理</h2>
+      <table>
+        <thead>
+          <tr><th>命令</th><th>磁盘上发生什么</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>默认启动</td>
+            <td>create 新文件，写一行 meta</td>
+          </tr>
+          <tr>
+            <td><code class="inline">--continue</code> / <code class="inline">-c</code></td>
+            <td>按 updatedAt 找最新 jsonl，load 全部 message 行</td>
+          </tr>
+          <tr>
+            <td><code class="inline">--resume</code></td>
+            <td>列出 sessions，你选一个再 load</td>
+          </tr>
+          <tr>
+            <td><code class="inline">--session id</code></td>
+            <td>按 id / 部分 id / 路径 resolve 后 load</td>
+          </tr>
+          <tr>
+            <td><code class="inline">--list-sessions</code></td>
+            <td>读每个文件的 meta + 数 message 行</td>
+          </tr>
+          <tr>
+            <td><code class="inline">--no-session</code></td>
+            <td>不创建、不读写文件（纯内存）</td>
+          </tr>
+          <tr>
+            <td>REPL <code class="inline">/reset</code></td>
+            <td><strong>新建</strong>另一个 jsonl（旧文件保留）</td>
+          </tr>
+          <tr>
+            <td>REPL <code class="inline">/session</code></td>
+            <td>打印当前 id 与路径（不改文件）</td>
+          </tr>
+        </tbody>
+      </table>
+      <pre><span class="c"># 新开一轮并保存</span>
+npm run dev -- -p <span class="s">"create hello.ts"</span>
+
+<span class="c"># 接着聊</span>
+npm run dev -- -c -p <span class="s">"再加个 test"</span>
+
+<span class="c"># 看看有哪些会话</span>
+npm run dev -- --list-sessions</pre>
+    </section>
+
+    <section id="pitfalls">
+      <h2><span class="num">07</span> 容易误解的点</h2>
+      <table>
+        <thead>
+          <tr><th>误解</th><th>实际</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Session 会记住所有项目文件</td>
+            <td>只记对话消息；读代码仍靠 read/bash 工具</td>
+          </tr>
+          <tr>
+            <td>/reset 会删历史文件</td>
+            <td>只是换新文件；旧 jsonl 还在目录里</td>
+          </tr>
+          <tr>
+            <td>续聊 = 同一个模型请求一直开着</td>
+            <td>每次都是新的 API 调用，只是 messages 更长</td>
+          </tr>
+          <tr>
+            <td>meta 里的 model 会强制用旧模型</td>
+            <td>目前只作记录；真正用的是你当前 env 的 MODEL</td>
+          </tr>
+          <tr>
+            <td>和 Pi 的 session 树一样</td>
+            <td>我们是<strong>线性</strong> JSONL，没有 branch/fork（有意简化）</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="callout">
+        <strong>一句话：</strong>Session = <code class="inline">messages[]</code> 的磁盘镜像。
+        Agent loop 仍然是主角；session 只是让 loop 的输入能活过进程生命周期。
+      </div>
+    </section>
+
+    <footer>
+      <span>
+        <a href="./index.html">← 总览</a> ·
+        <a href="./streaming.html">Streaming</a>
+      </span>
+      <span>mini-pi · MIT · 仅供学习</span>
+    </footer>
+  </div>
+
+  <script>
+    (function () {
+      // ── flow highlighter ──
+      const steps = Array.from(document.querySelectorAll(".flow-step"));
+      let fi = 0;
+      function paintFlow() {
+        steps.forEach((el, idx) => el.classList.toggle("active", idx === fi));
+      }
+      document.getElementById("flow-next").addEventListener("click", () => {
+        fi = (fi + 1) % steps.length;
+        paintFlow();
+      });
+      document.getElementById("flow-reset").addEventListener("click", () => {
+        fi = 0;
+        paintFlow();
+      });
+
+      // ── jsonl demo ──
+      const body = document.getElementById("demo-body");
+      const stepEl = document.getElementById("demo-step");
+      const phaseEl = document.getElementById("demo-phase");
+      const countEl = document.getElementById("demo-count");
+
+      const script = [
+        {
+          phase: "create session",
+          role: "meta",
+          line: '{"type":"meta","id":"demo_e497cd","title":"(untitled)","cwd":"/proj"}',
+        },
+        {
+          phase: "user message",
+          role: "user",
+          line: '{"type":"message","ts":"T1","message":{"role":"user","content":"create hello.ts"}}',
+        },
+        {
+          phase: "assistant + tool_call",
+          role: "assistant",
+          line: '{"type":"message","ts":"T2","message":{"role":"assistant","content":"I\'ll write it.","tool_calls":[{"id":"call_1","type":"function","function":{"name":"write","arguments":"{\\"path\\":\\"hello.ts\\"}"}}]}}',
+        },
+        {
+          phase: "tool result",
+          role: "tool",
+          line: '{"type":"message","ts":"T3","message":{"role":"tool","tool_call_id":"call_1","content":"Wrote 26 chars"}}',
+        },
+        {
+          phase: "final assistant",
+          role: "assistant",
+          line: '{"type":"message","ts":"T4","message":{"role":"assistant","content":"Done — hello.ts created."}}',
+        },
+        {
+          phase: "meta title update",
+          role: "meta",
+          replaceMeta: true,
+          line: '{"type":"meta","id":"demo_e497cd","title":"create hello.ts","cwd":"/proj"}',
+        },
+      ];
+
+      let i = 0;
+      let lines = []; // {role, text}
+      let playing = false;
+      let timer = null;
+
+      function render(flashIdx) {
+        if (lines.length === 0) {
+          body.innerHTML = '<div class="jsonl-empty">点「播放」或「单步」开始写入…</div>';
+        } else {
+          body.innerHTML = lines
+            .map(
+              (L, idx) =>
+                `<div class="jsonl-line ${L.role}${idx === flashIdx ? " flash" : ""}">` +
+                `<span class="ln">${idx + 1}</span>` +
+                `<span class="tx">${escapeHtml(L.text)}</span></div>`,
+            )
+            .join("");
+          body.scrollTop = body.scrollHeight;
+        }
+        stepEl.textContent = String(i);
+        phaseEl.textContent = i === 0 ? "idle" : script[Math.min(i - 1, script.length - 1)].phase;
+        countEl.textContent = String(lines.length);
+      }
+
+      function escapeHtml(s) {
+        return s
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;");
+      }
+
+      function stepOnce() {
+        if (i >= script.length) {
+          playing = false;
+          phaseEl.textContent = "done — ready for --continue";
+          return false;
+        }
+        const ev = script[i++];
+        if (ev.replaceMeta) {
+          if (lines.length && lines[0].role === "meta") {
+            lines[0] = { role: "meta", text: ev.line };
+          } else {
+            lines.unshift({ role: "meta", text: ev.line });
+          }
+          render(0);
+        } else {
+          lines.push({ role: ev.role, text: ev.line });
+          render(lines.length - 1);
+        }
+        return i < script.length;
+      }
+
+      function reset() {
+        playing = false;
+        if (timer) clearTimeout(timer);
+        timer = null;
+        i = 0;
+        lines = [];
+        render(-1);
+      }
+
+      function play() {
+        if (playing) return;
+        if (i >= script.length) reset();
+        playing = true;
+        function tick() {
+          if (!playing) return;
+          const cont = stepOnce();
+          if (!cont) {
+            playing = false;
+            phaseEl.textContent = "done — ready for --continue";
+            return;
+          }
+          timer = setTimeout(tick, 700);
+        }
+        tick();
+      }
+
+      document.getElementById("demo-play").addEventListener("click", play);
+      document.getElementById("demo-step-btn").addEventListener("click", () => {
+        playing = false;
+        if (timer) clearTimeout(timer);
+        if (i >= script.length) reset();
+        stepOnce();
+      });
+      document.getElementById("demo-reset").addEventListener("click", reset);
+      reset();
+    })();
+  </script>
+</body>
+</html>

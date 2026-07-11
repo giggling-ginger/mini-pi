@@ -10,6 +10,7 @@ A **minimal Pi-inspired coding agent** for learning how agent harnesses work.
 
 - 总览：[docs/index.html](./docs/index.html) · [Pages](https://giggling-ginger.github.io/mini-pi/)
 - **Streaming 原理**：[docs/streaming.html](./docs/streaming.html) · [Pages](https://giggling-ginger.github.io/mini-pi/streaming.html)
+- **Sessions 原理**：[docs/sessions.html](./docs/sessions.html) · [Pages](https://giggling-ginger.github.io/mini-pi/sessions.html)
 
 Philosophy (inspired by [Pi](https://pi.dev)):
 
