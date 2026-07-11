@@ -24,16 +24,18 @@ Options:
   -h, --help      Show help
   -c, --cwd DIR   Working directory (default: current)
 
-Env:
-  XAI_API_KEY     xAI / SpaceXAI key (default provider)
-  MODEL           Model id (default: grok-4.5)
-  OPENAI_API_KEY  Alternative OpenAI-compatible key
-  OPENAI_BASE_URL Custom base URL
+Env (need a real API — SuperGrok/Codex sub is not enough):
+  PROVIDER           openai | openrouter | ollama | xai
+  MODEL              model id
+  OPENAI_API_KEY     platform.openai.com key (≠ ChatGPT sub)
+  OPENROUTER_API_KEY openrouter.ai
+  OLLAMA_HOST        default http://127.0.0.1:11434
+  XAI_API_KEY        console.x.ai (≠ SuperGrok)
 
 Examples:
+  PROVIDER=ollama MODEL=llama3.2 mini-pi -p "List files"
   mini-pi "List files in src/"
-  mini-pi -p "Create hello.ts that prints hi"
-  mini-pi                 # then chat interactively
+  mini-pi                 # interactive
 `.trim();
 
 function parseArgs(argv: string[]) {
@@ -113,7 +115,9 @@ async function main() {
   const client = createClient(config);
   const cwd = args.cwd;
 
-  console.error(`mini-pi  model=${config.model}  cwd=${cwd}`);
+  console.error(
+    `mini-pi  provider=${config.provider}  model=${config.model}  cwd=${cwd}`,
+  );
 
   const agentOpts = {
     client,

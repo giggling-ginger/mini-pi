@@ -20,25 +20,46 @@ Philosophy (inspired by [Pi](https://pi.dev)):
 ```bash
 cd mini-pi
 npm install
-
-# Use xAI (recommended)
-export XAI_API_KEY=xai-...
-
-# Single-shot
-npm run dev -- -p "Create a file hello.ts that prints hello"
-
-# Interactive
-npm run dev
 ```
 
-Or any OpenAI-compatible API:
+You need an **OpenAI-compatible HTTP API**. Chat subscriptions alone are not enough:
+
+| You have | Works with mini-pi? | What to do |
+|----------|---------------------|------------|
+| **SuperGrok** | No (that's grok.com chat) | xAI API is separate at [console.x.ai](https://console.x.ai) |
+| **Codex / ChatGPT Plus** | No (that's OAuth for Codex CLI) | Keep using `codex` for real work; or buy OpenAI **platform** API key |
+| **Ollama** (local) | Yes | Free — best for learning the harness |
+| **OpenRouter / OpenAI API / xAI API** | Yes | Set the matching env var |
+
+### Recommended if you have no paid API: Ollama
 
 ```bash
-export OPENAI_API_KEY=sk-...
-export OPENAI_BASE_URL=https://api.openai.com/v1   # optional
-export MODEL=gpt-4o
-npm run dev -- -p "List files"
+# install ollama, then:
+ollama pull llama3.2   # or qwen2.5-coder, etc.
+export PROVIDER=ollama
+export MODEL=llama3.2
+
+npm run dev -- -p "Create a file hello.ts that prints hello"
+npm run dev   # interactive
 ```
+
+### Other providers
+
+```bash
+# OpenRouter
+export OPENROUTER_API_KEY=sk-or-...
+export MODEL=openai/gpt-4o-mini
+
+# OpenAI platform API (≠ ChatGPT subscription billing)
+export OPENAI_API_KEY=sk-...
+export MODEL=gpt-4o-mini
+
+# xAI API (≠ SuperGrok)
+export XAI_API_KEY=xai-...
+export MODEL=grok-4.5
+```
+
+See [`.env.example`](./.env.example).
 
 ## Architecture
 
@@ -47,7 +68,7 @@ src/
   index.ts    CLI (REPL + single-shot)
   agent.ts    Agent loop: model ↔ tools
   tools.ts    read / write / edit / bash
-  llm.ts      OpenAI-compatible client (default: xAI)
+  llm.ts      OpenAI-compatible client (OpenAI / OpenRouter / Ollama / xAI)
   system.ts   Tiny system prompt
 ```
 
