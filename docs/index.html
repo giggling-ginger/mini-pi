@@ -1,0 +1,857 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>mini-pi 讲解 · 最小 Coding Agent 是怎么工作的</title>
+  <meta name="description" content="Learning project: 用一篇网页讲清楚 mini-pi 的 agent loop、四个工具与源码结构。灵感来自 Pi，非官方。" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #0c0e12;
+      --bg-elev: #13161d;
+      --bg-card: #171b24;
+      --border: #2a3140;
+      --text: #e8ecf4;
+      --muted: #8b95a8;
+      --faint: #5c667a;
+      --accent: #6ee7b7;
+      --accent-dim: #34d39933;
+      --cyan: #67e8f9;
+      --amber: #fbbf24;
+      --rose: #fb7185;
+      --violet: #a78bfa;
+      --blue: #60a5fa;
+      --radius: 12px;
+      --max: 820px;
+      --font: "IBM Plex Sans", system-ui, sans-serif;
+      --mono: "IBM Plex Mono", ui-monospace, monospace;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: var(--font);
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.65;
+      font-size: 16.5px;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* subtle grid */
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(110, 231, 183, 0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(110, 231, 183, 0.03) 1px, transparent 1px);
+      background-size: 48px 48px;
+      pointer-events: none;
+      z-index: 0;
+      mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, black, transparent);
+    }
+
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    .wrap {
+      position: relative;
+      z-index: 1;
+      max-width: var(--max);
+      margin: 0 auto;
+      padding: 0 1.25rem 5rem;
+    }
+
+    /* nav */
+    nav {
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      backdrop-filter: blur(12px);
+      background: rgba(12, 14, 18, 0.85);
+      border-bottom: 1px solid var(--border);
+      margin: 0 -1.25rem 0;
+      padding: 0.75rem 1.25rem;
+    }
+    nav .inner {
+      max-width: var(--max);
+      margin: 0 auto;
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      flex-wrap: wrap;
+      justify-content: space-between;
+    }
+    nav .brand {
+      font-family: var(--mono);
+      font-weight: 600;
+      font-size: 0.95rem;
+      color: var(--text);
+      letter-spacing: -0.02em;
+    }
+    nav .brand span { color: var(--accent); }
+    nav .links {
+      display: flex;
+      gap: 0.25rem 1rem;
+      flex-wrap: wrap;
+      font-size: 0.85rem;
+    }
+    nav .links a { color: var(--muted); }
+    nav .links a:hover { color: var(--text); text-decoration: none; }
+
+    /* hero */
+    header.hero {
+      padding: 3.5rem 0 2.5rem;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      font-family: var(--mono);
+      font-size: 0.72rem;
+      font-weight: 500;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--accent);
+      background: var(--accent-dim);
+      border: 1px solid rgba(110, 231, 183, 0.25);
+      padding: 0.3rem 0.65rem;
+      border-radius: 999px;
+      margin-bottom: 1.25rem;
+    }
+    h1 {
+      font-size: clamp(1.85rem, 5vw, 2.55rem);
+      font-weight: 700;
+      letter-spacing: -0.03em;
+      line-height: 1.2;
+      margin-bottom: 1rem;
+    }
+    h1 em {
+      font-style: normal;
+      color: var(--accent);
+    }
+    .lead {
+      font-size: 1.1rem;
+      color: var(--muted);
+      max-width: 38em;
+      margin-bottom: 1.5rem;
+    }
+    .cta-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+      margin-bottom: 1.5rem;
+    }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      font-family: var(--mono);
+      font-size: 0.85rem;
+      font-weight: 500;
+      padding: 0.55rem 1rem;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--bg-card);
+      color: var(--text);
+      transition: border-color 0.15s, background 0.15s;
+    }
+    .btn:hover { border-color: var(--accent); text-decoration: none; }
+    .btn.primary {
+      background: var(--accent);
+      color: #0c0e12;
+      border-color: var(--accent);
+    }
+    .btn.primary:hover { filter: brightness(1.08); }
+
+    .disclaimer {
+      font-size: 0.88rem;
+      color: var(--faint);
+      border-left: 2px solid var(--border);
+      padding-left: 0.85rem;
+    }
+
+    /* sections */
+    section {
+      margin-top: 3.25rem;
+      scroll-margin-top: 4rem;
+    }
+    h2 {
+      font-size: 1.35rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      margin-bottom: 0.85rem;
+      display: flex;
+      align-items: baseline;
+      gap: 0.6rem;
+    }
+    h2 .num {
+      font-family: var(--mono);
+      font-size: 0.8rem;
+      color: var(--accent);
+      font-weight: 600;
+    }
+    h3 {
+      font-size: 1.05rem;
+      font-weight: 600;
+      margin: 1.5rem 0 0.6rem;
+      color: var(--text);
+    }
+    p { margin-bottom: 0.9rem; color: var(--muted); }
+    p strong, li strong { color: var(--text); font-weight: 600; }
+
+    ul.plain {
+      list-style: none;
+      margin: 0.75rem 0 1rem;
+    }
+    ul.plain li {
+      position: relative;
+      padding-left: 1.2rem;
+      margin-bottom: 0.45rem;
+      color: var(--muted);
+    }
+    ul.plain li::before {
+      content: "→";
+      position: absolute;
+      left: 0;
+      color: var(--accent);
+      font-family: var(--mono);
+      font-size: 0.85rem;
+    }
+
+    /* cards */
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.85rem;
+      margin: 1rem 0;
+    }
+    @media (max-width: 640px) {
+      .grid-2 { grid-template-columns: 1fr; }
+    }
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.1rem 1.15rem;
+    }
+    .card h4 {
+      font-family: var(--mono);
+      font-size: 0.9rem;
+      font-weight: 600;
+      margin-bottom: 0.4rem;
+      color: var(--text);
+    }
+    .card p { font-size: 0.9rem; margin-bottom: 0; }
+    .card .tag {
+      font-family: var(--mono);
+      font-size: 0.68rem;
+      color: var(--faint);
+      margin-bottom: 0.35rem;
+    }
+
+    /* tool colors */
+    .tool-read h4 { color: var(--cyan); }
+    .tool-write h4 { color: var(--amber); }
+    .tool-edit h4 { color: var(--violet); }
+    .tool-bash h4 { color: var(--rose); }
+
+    /* loop diagram */
+    .loop {
+      background: var(--bg-elev);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.5rem 1.25rem;
+      margin: 1.25rem 0;
+      overflow-x: auto;
+    }
+    .loop-steps {
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+      min-width: 280px;
+    }
+    .loop-step {
+      display: grid;
+      grid-template-columns: 2.5rem 1fr;
+      gap: 0.75rem;
+      align-items: start;
+    }
+    .loop-step .rail {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      height: 100%;
+    }
+    .loop-step .dot {
+      width: 2rem;
+      height: 2rem;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: var(--mono);
+      font-size: 0.75rem;
+      font-weight: 600;
+      flex-shrink: 0;
+      border: 1.5px solid var(--border);
+      background: var(--bg-card);
+      color: var(--muted);
+    }
+    .loop-step.active .dot {
+      border-color: var(--accent);
+      color: var(--accent);
+      background: var(--accent-dim);
+      box-shadow: 0 0 0 3px rgba(110, 231, 183, 0.12);
+    }
+    .loop-step .line {
+      width: 2px;
+      flex: 1;
+      min-height: 1.25rem;
+      background: var(--border);
+      margin: 0.25rem 0;
+    }
+    .loop-step:last-child .line { display: none; }
+    .loop-step .body {
+      padding-bottom: 1.15rem;
+    }
+    .loop-step .body h4 {
+      font-size: 0.95rem;
+      font-weight: 600;
+      margin-bottom: 0.2rem;
+    }
+    .loop-step .body p {
+      font-size: 0.88rem;
+      margin: 0;
+    }
+    .loop-step .body code {
+      font-family: var(--mono);
+      font-size: 0.8rem;
+      color: var(--cyan);
+    }
+
+    .loop-controls {
+      display: flex;
+      gap: 0.5rem;
+      margin-top: 0.5rem;
+      flex-wrap: wrap;
+    }
+    .loop-controls button {
+      font-family: var(--mono);
+      font-size: 0.78rem;
+      padding: 0.4rem 0.75rem;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: var(--bg-card);
+      color: var(--muted);
+      cursor: pointer;
+    }
+    .loop-controls button:hover {
+      color: var(--text);
+      border-color: var(--accent);
+    }
+
+    /* code */
+    pre, code { font-family: var(--mono); }
+    pre {
+      background: #0a0c10;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1rem 1.1rem;
+      overflow-x: auto;
+      font-size: 0.8rem;
+      line-height: 1.55;
+      margin: 0.85rem 0 1.1rem;
+      color: #c8d0e0;
+    }
+    pre .c { color: #5c667a; }      /* comment */
+    pre .k { color: #c4b5fd; }      /* keyword */
+    pre .s { color: #6ee7b7; }      /* string */
+    pre .f { color: #67e8f9; }      /* function */
+    pre .n { color: #fbbf24; }      /* number / name */
+    code.inline {
+      font-size: 0.86em;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      padding: 0.1em 0.35em;
+      border-radius: 4px;
+      color: var(--cyan);
+    }
+
+    /* tree */
+    .tree {
+      font-family: var(--mono);
+      font-size: 0.82rem;
+      line-height: 1.7;
+      color: var(--muted);
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1rem 1.2rem;
+      margin: 1rem 0;
+    }
+    .tree .dir { color: var(--amber); }
+    .tree .file { color: var(--text); }
+    .tree .note { color: var(--faint); }
+
+    /* message sim */
+    .msg-stack {
+      display: flex;
+      flex-direction: column;
+      gap: 0.55rem;
+      margin: 1rem 0;
+    }
+    .msg {
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      padding: 0.7rem 0.9rem;
+      font-size: 0.88rem;
+    }
+    .msg .role {
+      font-family: var(--mono);
+      font-size: 0.7rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 0.3rem;
+    }
+    .msg.system { background: #1a1520; border-color: #3d2f55; }
+    .msg.system .role { color: var(--violet); }
+    .msg.user { background: #121a22; border-color: #1e3a4f; }
+    .msg.user .role { color: var(--blue); }
+    .msg.assistant { background: #121a16; border-color: #1e3d32; }
+    .msg.assistant .role { color: var(--accent); }
+    .msg.tool { background: #1a1612; border-color: #3d3520; }
+    .msg.tool .role { color: var(--amber); }
+    .msg .payload { color: var(--muted); font-family: var(--mono); font-size: 0.8rem; white-space: pre-wrap; }
+
+    /* table */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.9rem;
+      margin: 1rem 0;
+    }
+    th, td {
+      text-align: left;
+      padding: 0.65rem 0.75rem;
+      border-bottom: 1px solid var(--border);
+    }
+    th {
+      font-family: var(--mono);
+      font-size: 0.75rem;
+      color: var(--faint);
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    td { color: var(--muted); }
+    td:first-child {
+      font-family: var(--mono);
+      color: var(--text);
+      font-size: 0.85rem;
+      white-space: nowrap;
+    }
+
+    /* not list */
+    .not-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.5rem 1rem;
+      margin: 1rem 0;
+    }
+    @media (max-width: 540px) { .not-grid { grid-template-columns: 1fr; } }
+    .not-item {
+      font-size: 0.9rem;
+      color: var(--muted);
+      padding: 0.4rem 0;
+    }
+    .not-item::before {
+      content: "× ";
+      color: var(--rose);
+      font-weight: 600;
+    }
+
+    footer {
+      margin-top: 4rem;
+      padding-top: 1.5rem;
+      border-top: 1px solid var(--border);
+      font-size: 0.85rem;
+      color: var(--faint);
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem 1.5rem;
+      justify-content: space-between;
+    }
+
+    .callout {
+      background: linear-gradient(135deg, rgba(110, 231, 183, 0.08), rgba(103, 232, 249, 0.05));
+      border: 1px solid rgba(110, 231, 183, 0.2);
+      border-radius: var(--radius);
+      padding: 1rem 1.15rem;
+      margin: 1.25rem 0;
+      font-size: 0.95rem;
+      color: var(--muted);
+    }
+    .callout strong { color: var(--accent); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <nav>
+      <div class="inner">
+        <a class="brand" href="#">mini-<span>pi</span> 讲解</a>
+        <div class="links">
+          <a href="#why">理念</a>
+          <a href="#arch">架构</a>
+          <a href="#loop">循环</a>
+          <a href="#tools">工具</a>
+          <a href="#code">源码</a>
+          <a href="#next">扩展</a>
+          <a href="https://github.com/giggling-ginger/mini-pi" target="_blank" rel="noopener">GitHub ↗</a>
+        </div>
+      </div>
+    </nav>
+
+    <header class="hero">
+      <div class="badge">Learning Project · Not Production</div>
+      <h1>最小 Coding Agent<br />是怎么 <em>跑起来</em> 的</h1>
+      <p class="lead">
+        <strong style="color:var(--text)">mini-pi</strong> 是一个学习用的终端 coding agent：
+        极简 system prompt + 四个工具 + 一个 tool-calling 循环。
+        灵感来自 <a href="https://pi.dev" target="_blank" rel="noopener">Pi</a>，
+        <strong style="color:var(--text)">非官方、非附属</strong>。
+      </p>
+      <div class="cta-row">
+        <a class="btn primary" href="https://github.com/giggling-ginger/mini-pi">看源码</a>
+        <a class="btn" href="#loop">看 Agent Loop →</a>
+      </div>
+      <p class="disclaimer">
+        本页解释仓库里的真实代码结构。Agent 能执行 shell、改文件——只在可信工作区使用。
+      </p>
+    </header>
+
+    <!-- 1 philosophy -->
+    <section id="why">
+      <h2><span class="num">01</span> 为什么做这么「少」</h2>
+      <p>
+        市面上的 coding agent 功能很多：plan mode、subagent、MCP、权限弹窗、花哨 TUI……
+        Pi 的有趣之处在于反其道而行——<strong>内核刻意做小</strong>，复杂能力用扩展补。
+      </p>
+      <p>
+        mini-pi 更进一步：只保留「能改代码」的最小闭环，方便你看清
+        <strong>所有 agent harness 共享的骨架</strong>：
+      </p>
+      <div class="callout">
+        <strong>Model + Prompt + Tools + Loop = Coding Agent</strong><br />
+        没有魔法。模型决定下一步；本地代码执行工具；结果塞回对话；重复直到模型闭嘴。
+      </div>
+      <ul class="plain">
+        <li><strong>短 prompt</strong> —— 少占上下文，少绑死行为</li>
+        <li><strong>四个工具</strong> —— 读写改文件 + 跑命令，够改代码了</li>
+        <li><strong>信任模型</strong> —— 不堆业务规则，把流程交给 LLM</li>
+      </ul>
+    </section>
+
+    <!-- 2 arch -->
+    <section id="arch">
+      <h2><span class="num">02</span> 源码地图</h2>
+      <p>整个项目几乎只有这些文件（外加配置）：</p>
+      <div class="tree">
+<span class="dir">src/</span>
+├── <span class="file">index.ts</span>    <span class="note"># CLI：REPL / 单次 -p</span>
+├── <span class="file">agent.ts</span>    <span class="note"># ★ Agent loop（核心）</span>
+├── <span class="file">tools.ts</span>    <span class="note"># read / write / edit / bash</span>
+├── <span class="file">llm.ts</span>      <span class="note"># OpenAI 兼容客户端（默认 xAI）</span>
+├── <span class="file">system.ts</span>   <span class="note"># 极简 system prompt</span>
+└── <span class="file">tools.test.ts</span> <span class="note"># 工具冒烟测试（无 API）</span>
+      </div>
+      <div class="grid-2">
+        <div class="card">
+          <div class="tag">入口</div>
+          <h4>index.ts</h4>
+          <p>解析参数、读 API key、交互输入，把用户消息交给 <code class="inline">runAgent</code>。</p>
+        </div>
+        <div class="card">
+          <div class="tag">大脑</div>
+          <h4>agent.ts</h4>
+          <p>维护 <code class="inline">messages[]</code>，反复调模型；有 tool_calls 就执行再塞回。</p>
+        </div>
+        <div class="card">
+          <div class="tag">手脚</div>
+          <h4>tools.ts</h4>
+          <p>工具的 JSON Schema（给模型看）+ 本地执行实现（真正改磁盘）。</p>
+        </div>
+        <div class="card">
+          <div class="tag">通道</div>
+          <h4>llm.ts</h4>
+          <p>用 OpenAI SDK 连 <code class="inline">api.x.ai</code> 或任意兼容端点。</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- 3 loop -->
+    <section id="loop">
+      <h2><span class="num">03</span> Agent Loop（全部核心）</h2>
+      <p>
+        下面是 <code class="inline">runAgent</code> 的逻辑。点「下一步」可走一遍一次典型任务：
+        <em style="color:var(--text)">「创建一个 hello.ts」</em>。
+      </p>
+
+      <div class="loop">
+        <div class="loop-steps" id="loop-steps">
+          <div class="loop-step active" data-step="0">
+            <div class="rail"><div class="dot">1</div><div class="line"></div></div>
+            <div class="body">
+              <h4>组装 messages</h4>
+              <p>system prompt +（可选）历史 + 本轮 user 消息。这是模型能看到的全部上下文。</p>
+            </div>
+          </div>
+          <div class="loop-step" data-step="1">
+            <div class="rail"><div class="dot">2</div><div class="line"></div></div>
+            <div class="body">
+              <h4>调用模型 <code>chat.completions.create</code></h4>
+              <p>带上 <code>tools</code> 定义，<code>tool_choice: "auto"</code>——让模型自己决定要不要调用工具。</p>
+            </div>
+          </div>
+          <div class="loop-step" data-step="2">
+            <div class="rail"><div class="dot">3</div><div class="line"></div></div>
+            <div class="body">
+              <h4>收到 assistant 回复</h4>
+              <p>可能有文字，也可能有 <code>tool_calls</code>（例如 write hello.ts）。把 assistant 消息 append 进数组。</p>
+            </div>
+          </div>
+          <div class="loop-step" data-step="3">
+            <div class="rail"><div class="dot">4</div><div class="line"></div></div>
+            <div class="body">
+              <h4>有 tool_calls？→ 本地执行</h4>
+              <p><code>executeTool(cwd, name, args)</code> 真正写文件 / 跑 bash。结果以 <code>role: "tool"</code> 写回 messages。</p>
+            </div>
+          </div>
+          <div class="loop-step" data-step="4">
+            <div class="rail"><div class="dot">5</div><div class="line"></div></div>
+            <div class="body">
+              <h4>回到步骤 2</h4>
+              <p>模型带着工具结果再推理。可能继续 read/edit/bash，也可能只输出总结文字。</p>
+            </div>
+          </div>
+          <div class="loop-step" data-step="5">
+            <div class="rail"><div class="dot">✓</div><div class="line"></div></div>
+            <div class="body">
+              <h4>没有 tool_calls → 结束</h4>
+              <p>返回更新后的 history。CLI 把最后的文字打印给你。默认最多 30 轮防死循环。</p>
+            </div>
+          </div>
+        </div>
+        <div class="loop-controls">
+          <button type="button" id="loop-prev">← 上一步</button>
+          <button type="button" id="loop-next">下一步 →</button>
+          <button type="button" id="loop-reset">重置</button>
+        </div>
+      </div>
+
+      <h3>一次真实的 messages 长什么样</h3>
+      <p>简化示意（不是完整 JSON）：</p>
+      <div class="msg-stack">
+        <div class="msg system">
+          <div class="role">system</div>
+          <div class="payload">You are a coding agent… four tools: read, write, edit, bash…</div>
+        </div>
+        <div class="msg user">
+          <div class="role">user</div>
+          <div class="payload">Create hello.ts that prints hello</div>
+        </div>
+        <div class="msg assistant">
+          <div class="role">assistant · tool_call</div>
+          <div class="payload">write({ path: "hello.ts", content: "console.log('hello')" })</div>
+        </div>
+        <div class="msg tool">
+          <div class="role">tool · write</div>
+          <div class="payload">Wrote 24 chars to /…/hello.ts</div>
+        </div>
+        <div class="msg assistant">
+          <div class="role">assistant</div>
+          <div class="payload">Created hello.ts that prints "hello".</div>
+        </div>
+      </div>
+      <p>
+        关键：模型<strong>从不直接碰磁盘</strong>。它只输出结构化请求；
+        你的 <code class="inline">tools.ts</code> 才是真正改世界的那一层。
+      </p>
+    </section>
+
+    <!-- 4 tools -->
+    <section id="tools">
+      <h2><span class="num">04</span> 四个工具</h2>
+      <p>
+        每个工具有两面：<strong>Schema</strong>（描述给模型）和 <strong>实现</strong>（在 Node 里执行）。
+        模型看到的是名字、说明和 JSON 参数；它填参数，你跑代码。
+      </p>
+      <div class="grid-2">
+        <div class="card tool-read">
+          <div class="tag">fs.readFile + 行号</div>
+          <h4>read</h4>
+          <p>读文件，可带 offset/limit。返回带行号的内容，方便模型引用。</p>
+        </div>
+        <div class="card tool-write">
+          <div class="tag">fs.writeFile</div>
+          <h4>write</h4>
+          <p>创建或覆盖整文件，自动建父目录。适合新文件或大改。</p>
+        </div>
+        <div class="card tool-edit">
+          <div class="tag">精确字符串替换</div>
+          <h4>edit</h4>
+          <p><code class="inline">old_string</code> → <code class="inline">new_string</code>。默认只允许匹配一次（防误伤）。</p>
+        </div>
+        <div class="card tool-bash">
+          <div class="tag">bash -lc</div>
+          <h4>bash</h4>
+          <p>在工作区跑 shell：ls、git、测试……有超时与输出截断。</p>
+        </div>
+      </div>
+      <h3>为什么是「精确替换」而不是 diff</h3>
+      <p>
+        和 Pi / Claude Code 一类工具一样：让模型给出<strong>能在文件里唯一命中的原文</strong>再替换。
+        简单、可预测；匹配 0 次或多次会报错，逼模型 <code class="inline">read</code> 后再试。
+      </p>
+    </section>
+
+    <!-- 5 code -->
+    <section id="code">
+      <h2><span class="num">05</span> 关键代码片段</h2>
+
+      <h3>System prompt（几乎就这么短）</h3>
+      <pre><span class="k">export function</span> <span class="f">buildSystemPrompt</span>(cwd: <span class="n">string</span>): <span class="n">string</span> {
+  <span class="k">return</span> <span class="s">`You are a coding agent in a terminal. Work in: ${cwd}
+
+You have four tools: read, write, edit, bash.
+- Prefer edit over rewrite for existing files.
+- Use bash for shell commands (ls, git, tests, etc.).
+- Be concise. Solve the task; don't narrate unless asked.
+- After tools finish, give a short summary of what you did.`</span>;
+}</pre>
+
+      <h3>Loop 的心脏</h3>
+      <pre><span class="k">for</span> (<span class="k">let</span> turn = <span class="n">0</span>; turn &lt; maxTurns; turn++) {
+  <span class="k">const</span> response = <span class="k">await</span> client.chat.completions.<span class="f">create</span>({
+    model,
+    messages,
+    tools: toolDefinitions,
+    tool_choice: <span class="s">"auto"</span>,
+  });
+
+  <span class="k">const</span> msg = response.choices[<span class="n">0</span>].message;
+  messages.<span class="f">push</span>({ role: <span class="s">"assistant"</span>, content: msg.content, tool_calls: msg.tool_calls });
+
+  <span class="k">const</span> toolCalls = msg.tool_calls ?? [];
+  <span class="k">if</span> (toolCalls.length === <span class="n">0</span>) <span class="k">return</span> messages;  <span class="c">// 模型做完了</span>
+
+  <span class="k">for</span> (<span class="k">const</span> call <span class="k">of</span> toolCalls) {
+    <span class="k">const</span> result = <span class="k">await</span> <span class="f">executeTool</span>(cwd, call.function.name, call.function.arguments);
+    messages.<span class="f">push</span>({ role: <span class="s">"tool"</span>, tool_call_id: call.id, content: result.output });
+  }
+  <span class="c">// 带着 tool 结果再进下一轮 for</span>
+}</pre>
+
+      <h3>本地跑起来</h3>
+      <pre><span class="c"># 仓库根目录</span>
+npm install
+<span class="k">export</span> XAI_API_KEY=xai-...
+
+npm run dev -- -p <span class="s">"List files and create a hello.ts"</span>
+npm run dev   <span class="c"># 交互 REPL；/reset 清历史，/exit 退出</span></pre>
+    </section>
+
+    <!-- 6 not -->
+    <section id="not">
+      <h2><span class="num">06</span> 刻意没有的东西</h2>
+      <p>不是做不到，是学习版先砍掉，避免核心被淹没：</p>
+      <div class="not-grid">
+        <div class="not-item">Session 落盘 / resume</div>
+        <div class="not-item">Token streaming</div>
+        <div class="not-item">权限沙箱 / 审批弹窗</div>
+        <div class="not-item">MCP / Skills / Extensions</div>
+        <div class="not-item">Subagent / Plan mode</div>
+        <div class="not-item">富文本 TUI</div>
+        <div class="not-item">上下文自动压缩</div>
+        <div class="not-item">多模型热切换 UI</div>
+      </div>
+      <p>真正的 Pi 用扩展系统把这些能力加回去；OpenClaw 等产品则在类似内核上接聊天通道。</p>
+    </section>
+
+    <!-- 7 next -->
+    <section id="next">
+      <h2><span class="num">07</span> 如果你想接着长</h2>
+      <table>
+        <thead>
+          <tr><th>方向</th><th>做什么</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Streaming</td>
+            <td><code class="inline">stream: true</code>，边生成边往终端打字</td>
+          </tr>
+          <tr>
+            <td>Session JSONL</td>
+            <td>每条消息 append 到文件；<code class="inline">--continue</code> 读回来</td>
+          </tr>
+          <tr>
+            <td>AGENTS.md</td>
+            <td>启动时读项目说明，拼进 system prompt</td>
+          </tr>
+          <tr>
+            <td>Extensions</td>
+            <td>从目录动态 import 额外工具，支持热重载</td>
+          </tr>
+          <tr>
+            <td>Compaction</td>
+            <td>接近上下文上限时，把旧轮次总结成摘要消息</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="callout">
+        学完 mini-pi 再去读 <a href="https://github.com/earendil-works/pi" target="_blank" rel="noopener">earendil-works/pi</a>
+        会轻松很多——你会认出同一个 loop，只是外壳厚得多。
+      </div>
+    </section>
+
+    <footer>
+      <span>mini-pi · MIT · 仅供学习</span>
+      <span>
+        灵感来自 <a href="https://pi.dev">Pi</a> ·
+        <a href="https://github.com/giggling-ginger/mini-pi">GitHub</a>
+      </span>
+    </footer>
+  </div>
+
+  <script>
+    (function () {
+      const steps = Array.from(document.querySelectorAll(".loop-step"));
+      let i = 0;
+      function paint() {
+        steps.forEach((el, idx) => {
+          el.classList.toggle("active", idx === i);
+        });
+      }
+      document.getElementById("loop-next").addEventListener("click", () => {
+        i = Math.min(steps.length - 1, i + 1);
+        paint();
+      });
+      document.getElementById("loop-prev").addEventListener("click", () => {
+        i = Math.max(0, i - 1);
+        paint();
+      });
+      document.getElementById("loop-reset").addEventListener("click", () => {
+        i = 0;
+        paint();
+      });
+    })();
+  </script>
+</body>
+</html>

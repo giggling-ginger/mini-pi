@@ -6,6 +6,8 @@
 
 A **minimal Pi-inspired coding agent** for learning how agent harnesses work.
 
+**讲解网页：** 打开 [`docs/index.html`](./docs/index.html)（本地双击即可），或看 [GitHub Pages](https://giggling-ginger.github.io/mini-pi/)（启用后）。
+
 Philosophy (inspired by [Pi](https://pi.dev)):
 
 - Tiny system prompt
