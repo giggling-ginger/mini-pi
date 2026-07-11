@@ -343,36 +343,82 @@
       <h2><span class="num">03</span> 难点：tool_call 也是「碎片」</h2>
       <p>
         若模型决定调用 <code class="inline">write</code>，参数 JSON 不会一个 chunk 给全。
-        而是拆成很多小片段——和文字一样，也是边生成边推：
+        而是拆成很多小片段——和文字一样，也是边生成边推。
       </p>
-      <pre><span class="c">// chunk 1</span>
-delta.tool_calls[0] = { index: <span class="n">0</span>, id: <span class="s">"call_abc"</span>, function: { name: <span class="s">"write"</span>, arguments: <span class="s">""</span> } }
 
-<span class="c">// chunk 2</span>
-delta.tool_calls[0] = { index: <span class="n">0</span>, function: { arguments: <span class="s">'{"path":'</span> } }
+      <h3>先分清两个「编号」</h3>
+      <div class="grid-2">
+        <div class="card">
+          <h4>chunk 序号（时间顺序）</h4>
+          <p>
+            网络上第 1 包、第 2 包、第 3 包……只是<strong>到达的先后</strong>。
+            API 里<strong>没有</strong>叫 chunk_id 的字段；下面注释里的 “chunk 1/2/3” 只是方便阅读。
+          </p>
+        </div>
+        <div class="card">
+          <h4>index（工具调用槽位）</h4>
+          <p>
+            <code class="inline">index: 0</code> = 这一轮 assistant 要调的<strong>第 1 个工具</strong>。
+            若一次并行调两个工具，会有 <code class="inline">index: 0</code> 和 <code class="inline">index: 1</code>。
+            只调一个时，<strong>所有碎片都是 index 0</strong>——正常！
+          </p>
+        </div>
+      </div>
+      <div class="callout">
+        <strong>类比：</strong>你在拼一封信（一个 tool call）。邮差分 4 次送来 4 张纸条，
+        每张都写着「这是第 0 封信的碎片」，内容分别是 <code class="inline">{"path":</code>、
+        <code class="inline">"hello.ts",</code>……你要按顺序粘成完整 JSON。
+        不是「4 封不同的信」，所以 index 一直是 0。
+      </div>
 
-<span class="c">// chunk 3</span>
-delta.tool_calls[0] = { index: <span class="n">0</span>, function: { arguments: <span class="s">'"hello.ts",'</span> } }
+      <h3>只有 1 个工具时：index 一直是 0</h3>
+      <pre><span class="c">// 时间 → 往后走；槽位始终是「第 0 个工具调用」</span>
 
-<span class="c">// chunk 4</span>
-delta.tool_calls[0] = { index: <span class="n">0</span>, function: { arguments: <span class="s">'"content":"hi"}'</span> }
+<span class="c">// 第 1 包到达：新建槽位 0，记下名字 write</span>
+delta.tool_calls = [{
+  index: <span class="n">0</span>,              <span class="c">// ← 第 0 个工具（不是第 0 个包）</span>
+  id: <span class="s">"call_abc"</span>,
+  function: { name: <span class="s">"write"</span>, arguments: <span class="s">""</span> }
+}]
+<span class="c">// 客户端累加器: tools[0] = { name:"write", arguments:"" }</span>
 
-<span class="c">// 最后 finish_reason = "tool_calls"</span></pre>
+<span class="c">// 第 2 包：还是槽位 0，追加参数碎片</span>
+delta.tool_calls = [{
+  index: <span class="n">0</span>,
+  function: { arguments: <span class="s">'{"path":'</span> }
+}]
+<span class="c">// tools[0].arguments = '{"path":'</span>
+
+<span class="c">// 第 3 包</span>
+<span class="c">// tools[0].arguments = '{"path":"hello.ts",'</span>
+
+<span class="c">// 第 4 包</span>
+<span class="c">// tools[0].arguments = '{"path":"hello.ts","content":"hi"}'  ← 这才完整</span>
+
+<span class="c">// 流结束 finish_reason = "tool_calls" → 现在才能 executeTool("write", 完整JSON)</span></pre>
+
+      <h3>若一次并行调 2 个工具：才会出现 index 1</h3>
+      <pre><span class="c">// 同一轮里模型说：先 read 再 bash（并行两个 tool_calls）</span>
+
+<span class="c">// 某包：往槽位 0 填</span>
+{ index: <span class="n">0</span>, function: { name: <span class="s">"read"</span>,  arguments: <span class="s">'{"path":"a.ts"}'</span> } }
+
+<span class="c">// 某包：往槽位 1 填  ← 这才是第二个工具</span>
+{ index: <span class="n">1</span>, function: { name: <span class="s">"bash"</span>,  arguments: <span class="s">'{"command":"ls"}'</span> } }
+
+<span class="c">// 客户端必须用 Map 按 index 分开拼，不能全糊在一个字符串上</span></pre>
       <div class="callout">
         <strong>绝对不能</strong>在参数还没拼完时就 <code class="inline">executeTool</code>——
-        半截 JSON 会 <code class="inline">JSON.parse</code> 失败，或者写坏文件。
+        半截 JSON 会 parse 失败，或者写坏文件。
         mini-pi 用 <code class="inline">Map&lt;index, {id,name,arguments}&gt;</code> 累加，
-        流结束后再变成完整的 <code class="inline">tool_calls</code>，然后才进 agent loop 的执行阶段。
+        流结束后再变成完整的 <code class="inline">tool_calls</code>，然后才执行。
       </div>
       <p>所以 streaming 下的一轮其实是：</p>
       <ul class="plain">
-        <li><strong>收流</strong>：content 增量打印；tool 参数静默拼接</li>
+        <li><strong>收流</strong>：content 增量打印；每个 index 各自拼 arguments</li>
         <li><strong>收完</strong>：得到完整 assistant message（和一次非流式返回的形状一样）</li>
         <li><strong>执行工具</strong>（若有）→ 结果塞回 messages → 再开下一轮 stream</li>
       </ul>
-      <p>
-        并行多个工具时，用 <code class="inline">tool_calls[].index</code> 区分第 0、1、2 个调用，各自累加。
-      </p>
     </section>
 
     <section id="demo">
