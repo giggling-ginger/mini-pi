@@ -306,46 +306,190 @@
     </section>
 
     <section id="how">
-      <h2><span class="num">02</span> mini-pi 怎么做</h2>
-      <ol class="plain" style="list-style:none">
-        <li><strong>估 token</strong> — 粗算 <code class="inline">chars / 4</code>（够用，不必接 tokenizer）</li>
-        <li><strong>过阈值？</strong> — 默认约 8000；可用 <code class="inline">--compact-threshold</code> 调</li>
-        <li><strong>切开</strong> — 尾部保留 ~3000 token 的「recent」，尽量从某条 <code class="inline">user</code> 切开（避免拆开 tool 链）</li>
-        <li><strong>摘要 old</strong> — 默认再调一次模型（无 tools）；失败/测试可用本地抽取摘要</li>
-        <li><strong>替换</strong> — <code class="inline">[summary user] + [ack assistant] + recent</code></li>
-      </ol>
+      <h2><span class="num">02</span> 先建立心智模型</h2>
+      <p>
+        发给模型的永远是一串 <code class="inline">messages[]</code>。
+        Compaction <strong>不改 agent loop</strong>，只在 loop 开始前把这串数组变短。
+      </p>
+      <pre><span class="c">// 压缩前（很长）</span>
+[ u1, a1, t1, u2, a2, t2, … u20, a20, t20 ]
 
-      <div class="split">
-        <div class="pane">
-          <h4>old（将被折叠）</h4>
-          <p>更早的 user / assistant / tool… 可能很长</p>
+<span class="c">// 压缩后（短）</span>
+[ summaryUser, ackAssistant,  …最近几条原文… ]
+     ↑ 旧的一大坨变成这两条                  ↑ 细节还在</pre>
+      <div class="callout">
+        <strong>类比：</strong>写小说大纲。
+        前 15 章压成一段「前情提要」，最近 2 章全文保留——续写时既不丢主线，也不把全书贴进编辑器。
+      </div>
+    </section>
+
+    <section id="source">
+      <h2><span class="num">03</span> 源码逐步对照</h2>
+      <p>文件：<code class="inline">src/compact.ts</code> + <code class="inline">src/agent.ts</code>。按调用顺序读。</p>
+
+      <h3>入口：谁在什么时候调用？</h3>
+      <p>
+        每次 <code class="inline">runAgent(prompt, history)</code>，在拼本轮消息<strong>之前</strong>：
+      </p>
+      <pre><span class="c">// agent.ts — runAgent 开头</span>
+<span class="k">let</span> hist = history.<span class="f">filter</span>(m =&gt; m.role !== <span class="s">"system"</span>)
+
+<span class="k">if</span> (compact) {
+  <span class="k">const</span> result = <span class="k">await</span> <span class="f">maybeCompact</span>(client, model, hist, compactOptions)
+  hist = result.history   <span class="c">// 可能已被换成「摘要 + 近期」</span>
+  <span class="k">if</span> (result.compacted) onEvent({ type: <span class="s">"compact"</span>, ... })
+}
+
+<span class="c">// 然后再进正常 loop</span>
+messages = [ system, ...hist, 本轮 user ]</pre>
+      <p>
+        所以：压缩发生在「你刚输入、模型还没开始想」的那一刻。
+        本轮 user 还没加进去，只压<strong>历史</strong>。
+      </p>
+
+      <h3>步骤 A — 要不要压？（估 token）</h3>
+      <pre><span class="c">// compact.ts</span>
+<span class="k">function</span> <span class="f">estimateTokens</span>(messages) {
+  <span class="c">// 把每条 message 的文字、tool 参数字符数加起来</span>
+  <span class="k">return</span> Math.<span class="f">ceil</span>(总字符数 / <span class="n">4</span>)
+}
+
+<span class="c">// maybeCompact 里：</span>
+<span class="k">if</span> (!force &amp;&amp; beforeTokens &lt; threshold)  <span class="c">// 默认 threshold=8000</span>
+  <span class="k">return</span> { compacted: <span class="k">false</span>, history: 原样 }  <span class="c">// 不压，直接走</span></pre>
+      <p>
+        <code class="inline">/4</code> 是粗算（英文大约 1 token ≈ 4 字符）。
+        我们只要「差不多到上限了吗」，不要计费级精度。
+      </p>
+
+      <h3>步骤 B — 从哪切开？<code class="inline">splitOldRecent</code></h3>
+      <p>目标：尾部留约 <code class="inline">keepRecent</code>（默认 3000）token 的 <strong>recent</strong>，前面全是 <strong>old</strong>。</p>
+      <pre><span class="c">// 从数组末尾往前扫，累加 token，直到预算用完</span>
+<span class="k">for</span> (i = 最后一条; i &gt;= 0; i--) {
+  <span class="k">if</span> (再加这条会超过 keepRecent &amp;&amp; 已经有 recent)
+    <span class="k">break</span>
+  tokenBudget += 这条
+  idx = i   <span class="c">// recent 从 idx 开始</span>
+}
+
+<span class="c">// 关键：把 idx 往右滑到最近的 user，避免从 tool 中间切开</span>
+<span class="k">while</span> (messages[idx].role !== <span class="s">"user"</span>) idx++</pre>
+      <p>举例（箭头 = 切开位置）：</p>
+      <pre>u1 a1 t1 | u2 a2 t2 u3 a3
+  old    ↑      recent
+         必须落在 user 上
+
+<span class="c">// 错误切法（会炸）：</span>
+u1 a1 | t1 u2 …     <span class="c">// t1 需要前面的 a1.tool_calls，API 拒绝</span></pre>
+
+      <h3>步骤 C — 把 old 变成短摘要</h3>
+      <p>两条路：</p>
+      <div class="grid-2">
+        <div class="card">
+          <h4>llmSummary（默认）</h4>
+          <p>
+            把 old 打成纯文本 transcript，再单独调一次
+            <code class="inline">chat.completions</code>（<strong>不带 tools</strong>），
+            请模型写 bullet 摘要：目标、改过的文件、命令、错误、当前状态。
+          </p>
         </div>
-        <div class="arrow">→</div>
-        <div class="pane">
-          <h4>summary 对</h4>
-          <p>一条 user 摘要 + 一条 assistant「收到」</p>
+        <div class="card">
+          <h4>localSummary（测试/离线）</h4>
+          <p>
+            不调 API：每条 user/assistant/tool 截一行 bullet。
+            粗糙但零成本，方便单测。
+          </p>
         </div>
       </div>
 
-      <pre><span class="c">// runAgent 开头（简化）</span>
-<span class="k">if</span> (compact) {
-  <span class="k">const</span> result = <span class="k">await</span> <span class="f">maybeCompact</span>(client, model, history, opts)
-  <span class="k">if</span> (result.compacted) {
-    history = result.history
-    onEvent({ type: <span class="s">"compact"</span>, ... })
-  }
-}
-messages = [ system, ...history, userMessage ]</pre>
+      <h3>步骤 D — 拼回新 history</h3>
+      <pre><span class="c">// maybeCompact 末尾</span>
+folded = [
+  {
+    role: <span class="s">"user"</span>,
+    content: <span class="s">"[Conversation summary — earlier turns compacted]\n"</span> + summary
+  },
+  {
+    role: <span class="s">"assistant"</span>,
+    content: <span class="s">"Understood. I have the summarized context…"</span>
+  },
+  ...recent   <span class="c">// 近期原文，一字不改</span>
+]
+<span class="k">return</span> { history: folded, compacted: <span class="k">true</span>, beforeTokens, afterTokens, ... }</pre>
+      <p>
+        为什么要一对 user+assistant，而不是只塞一条 system？
+        因为 history 里我们<strong>从不持久化 system</strong>（system 每次现拼）；
+        用 user/assistant 对能自然躺在 session JSONL 里，续聊时也能 load 回来。
+      </p>
 
+      <h3>步骤 E — 写回 session</h3>
+      <p>
+        压缩后数组<strong>前缀变了</strong>（不是简单 append），所以
+        <code class="inline">session.syncFromHistory</code> 会<strong>整文件 rewrite</strong> JSONL，
+        而不是只在末尾加行。
+      </p>
+    </section>
+
+    <section id="example">
+      <h2><span class="num">04</span> 一个完整数字例子</h2>
+      <p>假设 threshold=100，keepRecent=40（数字缩小便于想）。</p>
+      <pre><span class="c">// 压缩前 history（估 150 tok）</span>
+0 user:       创建 app
+1 assistant:  写 package.json  (tool write)
+2 tool:       Wrote …
+3 user:       加路由
+4 assistant:  改了 router.ts
+5 tool:       …
+… （中间很多）
+18 user:      修测试
+19 assistant: 跑 vitest
+20 tool:      3 failed …
+
+<span class="c">// split：从末尾攒 ~40 tok → 落在某条 user，比如 index 16</span>
+old    = [0 .. 15]     <span class="c">// 将被折叠</span>
+recent = [16 .. 20]    <span class="c">// 原文保留</span>
+
+<span class="c">// llm 摘要 old → 一段 bullets</span>
+summary = "- 建了 app 与路由\n- 改了 router.ts\n- 测试仍有失败…"
+
+<span class="c">// 压缩后 history（估 ~55 tok）</span>
+0 user:      [Conversation summary…] + summary
+1 assistant: Understood…
+2 user:      修测试          <span class="c">// 原 18</span>
+3 assistant: 跑 vitest
+4 tool:      3 failed …</pre>
+      <p>
+        之后你再说「继续修」，模型看到的是：摘要里的「测试在挂」+ 最近 vitest 输出原文。
+        它<strong>丢了</strong>中间某次无关的闲聊细节，但<strong>保留了</strong>刚发生的错误日志。
+      </p>
+    </section>
+
+    <section id="algo">
+      <h2><span class="num">05</span> 算法流程（对照函数）</h2>
+      <pre>runAgent()
+  │
+  ├─ estimateTokens(history)          <span class="c">// A 估大小</span>
+  │     └─ &lt; threshold? → 不压，返回原 history
+  │
+  ├─ splitOldRecent(history, keep)    <span class="c">// B 切开</span>
+  │     ├─ 从尾部累加 token
+  │     └─ 对齐到 user 边界
+  │
+  ├─ llmSummary(old) 或 localSummary  <span class="c">// C 有损压缩</span>
+  │
+  ├─ folded = [summaryUser, ack, ...recent]  <span class="c">// D 重组</span>
+  │
+  └─ messages = [system, ...folded, 新user]
+        → 正常 tool loop…</pre>
       <div class="callout">
-        <strong>为什么从 user 切开？</strong>
-        Assistant 的 <code class="inline">tool_calls</code> 必须和后面的 <code class="inline">role: tool</code> 成对。
-        若 recent 从半截 tool 结果开始，API 会报协议错误。
+        <strong>关键：这是有损压缩。</strong>
+        不像 zip，不能还原原文。换的是上下文空间；代价是可能丢掉旧细节。
+        所以 keepRecent 别太小——最近几轮（尤其 tool 输出）通常最重要。
       </div>
     </section>
 
     <section id="demo">
-      <h2><span class="num">03</span> 交互演示</h2>
+      <h2><span class="num">06</span> 交互演示</h2>
       <p>点「灌满历史」模拟变长，越过阈值后自动压缩（示意，非真 API）。</p>
       <div class="meter-wrap">
         <div class="meter-label">
