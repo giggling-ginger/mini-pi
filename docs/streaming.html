@@ -1,0 +1,596 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Streaming 原理 · mini-pi</title>
+  <meta name="description" content="讲解 coding agent 里 token streaming 与 tool_call 增量组装的原理" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #0c0e12;
+      --bg-elev: #13161d;
+      --bg-card: #171b24;
+      --border: #2a3140;
+      --text: #e8ecf4;
+      --muted: #8b95a8;
+      --faint: #5c667a;
+      --accent: #6ee7b7;
+      --accent-dim: #34d39933;
+      --cyan: #67e8f9;
+      --amber: #fbbf24;
+      --rose: #fb7185;
+      --violet: #a78bfa;
+      --blue: #60a5fa;
+      --radius: 12px;
+      --max: 820px;
+      --font: "IBM Plex Sans", system-ui, sans-serif;
+      --mono: "IBM Plex Mono", ui-monospace, monospace;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: var(--font);
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.65;
+      font-size: 16.5px;
+      -webkit-font-smoothing: antialiased;
+    }
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(103, 232, 249, 0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(103, 232, 249, 0.03) 1px, transparent 1px);
+      background-size: 48px 48px;
+      pointer-events: none;
+      z-index: 0;
+      mask-image: radial-gradient(ellipse 80% 50% at 50% 0%, black, transparent);
+    }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .wrap { position: relative; z-index: 1; max-width: var(--max); margin: 0 auto; padding: 0 1.25rem 5rem; }
+
+    nav {
+      position: sticky; top: 0; z-index: 50;
+      backdrop-filter: blur(12px);
+      background: rgba(12, 14, 18, 0.85);
+      border-bottom: 1px solid var(--border);
+      margin: 0 -1.25rem;
+      padding: 0.75rem 1.25rem;
+    }
+    nav .inner {
+      max-width: var(--max); margin: 0 auto;
+      display: flex; align-items: center; gap: 1rem;
+      flex-wrap: wrap; justify-content: space-between;
+    }
+    nav .brand {
+      font-family: var(--mono); font-weight: 600; font-size: 0.95rem; color: var(--text);
+    }
+    nav .brand span { color: var(--cyan); }
+    nav .links { display: flex; gap: 0.25rem 1rem; flex-wrap: wrap; font-size: 0.85rem; }
+    nav .links a { color: var(--muted); }
+    nav .links a:hover { color: var(--text); text-decoration: none; }
+
+    header.hero { padding: 3rem 0 2rem; }
+    .badge {
+      display: inline-flex; gap: 0.4rem;
+      font-family: var(--mono); font-size: 0.72rem; font-weight: 500;
+      letter-spacing: 0.04em; text-transform: uppercase;
+      color: var(--cyan); background: rgba(103, 232, 249, 0.1);
+      border: 1px solid rgba(103, 232, 249, 0.25);
+      padding: 0.3rem 0.65rem; border-radius: 999px; margin-bottom: 1.15rem;
+    }
+    h1 {
+      font-size: clamp(1.75rem, 5vw, 2.4rem);
+      font-weight: 700; letter-spacing: -0.03em; line-height: 1.2; margin-bottom: 1rem;
+    }
+    h1 em { font-style: normal; color: var(--cyan); }
+    .lead { font-size: 1.08rem; color: var(--muted); max-width: 40em; margin-bottom: 1rem; }
+
+    section { margin-top: 3rem; scroll-margin-top: 4rem; }
+    h2 {
+      font-size: 1.3rem; font-weight: 700; letter-spacing: -0.02em;
+      margin-bottom: 0.85rem; display: flex; align-items: baseline; gap: 0.6rem;
+    }
+    h2 .num { font-family: var(--mono); font-size: 0.8rem; color: var(--cyan); font-weight: 600; }
+    h3 { font-size: 1.05rem; font-weight: 600; margin: 1.4rem 0 0.55rem; }
+    p { margin-bottom: 0.85rem; color: var(--muted); }
+    p strong, li strong { color: var(--text); font-weight: 600; }
+
+    ul.plain { list-style: none; margin: 0.75rem 0 1rem; }
+    ul.plain li {
+      position: relative; padding-left: 1.2rem; margin-bottom: 0.4rem; color: var(--muted);
+    }
+    ul.plain li::before {
+      content: "→"; position: absolute; left: 0; color: var(--cyan);
+      font-family: var(--mono); font-size: 0.85rem;
+    }
+
+    .grid-2 {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 0.85rem; margin: 1rem 0;
+    }
+    @media (max-width: 640px) { .grid-2 { grid-template-columns: 1fr; } }
+    .card {
+      background: var(--bg-card); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 1.1rem 1.15rem;
+    }
+    .card h4 {
+      font-family: var(--mono); font-size: 0.88rem; font-weight: 600;
+      margin-bottom: 0.4rem; color: var(--text);
+    }
+    .card p { font-size: 0.9rem; margin-bottom: 0; }
+    .card.wait h4 { color: var(--amber); }
+    .card.stream h4 { color: var(--cyan); }
+
+    .callout {
+      background: linear-gradient(135deg, rgba(103, 232, 249, 0.08), rgba(110, 231, 183, 0.05));
+      border: 1px solid rgba(103, 232, 249, 0.22);
+      border-radius: var(--radius); padding: 1rem 1.15rem; margin: 1.15rem 0;
+      font-size: 0.95rem; color: var(--muted);
+    }
+    .callout strong { color: var(--cyan); }
+
+    pre, code { font-family: var(--mono); }
+    pre {
+      background: #0a0c10; border: 1px solid var(--border); border-radius: var(--radius);
+      padding: 1rem 1.1rem; overflow-x: auto; font-size: 0.78rem; line-height: 1.55;
+      margin: 0.85rem 0 1.1rem; color: #c8d0e0;
+    }
+    pre .c { color: #5c667a; }
+    pre .k { color: #c4b5fd; }
+    pre .s { color: #6ee7b7; }
+    pre .f { color: #67e8f9; }
+    pre .n { color: #fbbf24; }
+    pre .d { color: #fb7185; }
+    code.inline {
+      font-size: 0.86em; background: var(--bg-card); border: 1px solid var(--border);
+      padding: 0.1em 0.35em; border-radius: 4px; color: var(--cyan);
+    }
+
+    /* demo player */
+    .demo {
+      background: var(--bg-elev); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 1.15rem; margin: 1.15rem 0;
+    }
+    .demo-term {
+      background: #0a0c10; border: 1px solid var(--border); border-radius: 8px;
+      padding: 0.9rem 1rem; min-height: 9.5rem; font-family: var(--mono);
+      font-size: 0.82rem; line-height: 1.55; white-space: pre-wrap; word-break: break-word;
+    }
+    .demo-term .prompt { color: var(--faint); }
+    .demo-term .assistant { color: var(--text); }
+    .demo-term .tool { color: var(--cyan); }
+    .demo-term .result { color: #6ee7b7; }
+    .demo-term .cursor {
+      display: inline-block; width: 0.55ch; height: 1em;
+      background: var(--cyan); vertical-align: text-bottom;
+      animation: blink 1s step-end infinite;
+    }
+    @keyframes blink { 50% { opacity: 0; } }
+    .demo-meta {
+      display: flex; flex-wrap: wrap; gap: 0.5rem 1rem;
+      margin-top: 0.75rem; font-family: var(--mono); font-size: 0.75rem; color: var(--faint);
+    }
+    .demo-meta strong { color: var(--amber); font-weight: 500; }
+    .demo-controls { display: flex; gap: 0.5rem; margin-top: 0.85rem; flex-wrap: wrap; }
+    .demo-controls button {
+      font-family: var(--mono); font-size: 0.78rem; padding: 0.4rem 0.75rem;
+      border-radius: 6px; border: 1px solid var(--border); background: var(--bg-card);
+      color: var(--muted); cursor: pointer;
+    }
+    .demo-controls button:hover { color: var(--text); border-color: var(--cyan); }
+    .demo-controls button.primary {
+      background: rgba(103, 232, 249, 0.15); color: var(--cyan); border-color: rgba(103, 232, 249, 0.35);
+    }
+
+    /* wire timeline */
+    .wire {
+      display: flex; flex-direction: column; gap: 0.45rem; margin: 1rem 0;
+    }
+    .wire-row {
+      display: grid; grid-template-columns: 5.5rem 1fr; gap: 0.75rem;
+      font-size: 0.86rem; align-items: start;
+    }
+    .wire-row .who {
+      font-family: var(--mono); font-size: 0.72rem; font-weight: 600;
+      text-transform: uppercase; letter-spacing: 0.04em; padding-top: 0.15rem;
+    }
+    .wire-row .who.srv { color: var(--violet); }
+    .wire-row .who.cli { color: var(--cyan); }
+    .wire-row .pkt {
+      background: var(--bg-card); border: 1px solid var(--border);
+      border-radius: 8px; padding: 0.45rem 0.7rem; font-family: var(--mono);
+      font-size: 0.78rem; color: var(--muted);
+    }
+    .wire-row .pkt em { font-style: normal; color: var(--amber); }
+
+    table {
+      width: 100%; border-collapse: collapse; font-size: 0.9rem; margin: 1rem 0;
+    }
+    th, td {
+      text-align: left; padding: 0.6rem 0.7rem; border-bottom: 1px solid var(--border);
+    }
+    th {
+      font-family: var(--mono); font-size: 0.72rem; color: var(--faint);
+      text-transform: uppercase; letter-spacing: 0.04em; font-weight: 500;
+    }
+    td { color: var(--muted); }
+    td:first-child { font-family: var(--mono); color: var(--text); font-size: 0.84rem; }
+
+    footer {
+      margin-top: 4rem; padding-top: 1.5rem; border-top: 1px solid var(--border);
+      font-size: 0.85rem; color: var(--faint);
+      display: flex; flex-wrap: wrap; gap: 0.75rem 1.5rem; justify-content: space-between;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <nav>
+      <div class="inner">
+        <a class="brand" href="./index.html">mini-<span>pi</span> · streaming</a>
+        <div class="links">
+          <a href="./index.html">总览</a>
+          <a href="#why">为什么</a>
+          <a href="#sse">线路上</a>
+          <a href="#assemble">组装</a>
+          <a href="#demo">演示</a>
+          <a href="#code">代码</a>
+          <a href="https://github.com/giggling-ginger/mini-pi" target="_blank" rel="noopener">GitHub ↗</a>
+        </div>
+      </div>
+    </nav>
+
+    <header class="hero">
+      <div class="badge">Streaming · How it works</div>
+      <h1>Token 为什么能<br />一个字一个字 <em>蹦出来</em></h1>
+      <p class="lead">
+        Streaming 不改变 agent loop 的结构——还是「模型 → 工具 → 模型」。
+        它只改变<strong>助手那条消息是怎么到达你这边的</strong>：整包等完，还是边生成边推。
+      </p>
+      <p class="lead" style="font-size:0.95rem">
+        对应源码：<code class="inline">src/agent.ts</code> 里的 <code class="inline">streamCompletion</code>。
+      </p>
+    </header>
+
+    <section id="why">
+      <h2><span class="num">01</span> 等整包 vs 流式</h2>
+      <div class="grid-2">
+        <div class="card wait">
+          <h4>非流式 stream: false</h4>
+          <p>
+            一次 HTTP 请求，服务器把<strong>整句</strong>想完再返回 JSON。
+            终端安静几秒，然后突然整段出现。实现简单，体感像「卡一下」。
+          </p>
+        </div>
+        <div class="card stream">
+          <h4>流式 stream: true（默认）</h4>
+          <p>
+            同一次请求里，服务器<strong>边生成边推送小块</strong>。
+            你立刻看到字往外蹦；工具参数也是一点点拼出来的。
+          </p>
+        </div>
+      </div>
+      <div class="callout">
+        <strong>关键心智模型：</strong>模型一次只「想」一点点（token）。
+        非流式是服务端把 token 攒成完整回复再给你；流式是每攒一点就给你一点。
+        Agent 逻辑在客户端——你仍然要等<strong>完整的 tool_call 参数</strong>才能执行工具。
+      </div>
+    </section>
+
+    <section id="sse">
+      <h2><span class="num">02</span> 线路上长什么样</h2>
+      <p>
+        OpenAI 兼容 API 的 streaming 通常是 <strong>SSE</strong>（Server-Sent Events）：
+        响应头 <code class="inline">Content-Type: text/event-stream</code>，
+        正文一行行 <code class="inline">data: {...}</code>，最后 <code class="inline">data: [DONE]</code>。
+      </p>
+      <p>每个 <code class="inline">data</code> 里是一个小 JSON chunk，核心在 <code class="inline">choices[0].delta</code>：</p>
+      <pre>{
+  <span class="s">"id"</span>: <span class="s">"chatcmpl-..."</span>,
+  <span class="s">"object"</span>: <span class="s">"chat.completion.chunk"</span>,
+  <span class="s">"choices"</span>: [{
+    <span class="s">"index"</span>: <span class="n">0</span>,
+    <span class="s">"delta"</span>: {
+      <span class="c">// 文本增量（可能只有几个字符）</span>
+      <span class="s">"content"</span>: <span class="s">"Hel"</span>
+      <span class="c">// 或工具增量（见下一节）</span>
+    },
+    <span class="s">"finish_reason"</span>: <span class="k">null</span>
+  }]
+}</pre>
+      <p>
+        SDK（我们用的 <code class="inline">openai</code> 包）把 SSE 解析成异步迭代器：
+        <code class="inline">for await (const chunk of stream)</code>。
+        你不需要手写 SSE 解析，但要知道<strong>每个 chunk 都是不完整的</strong>。
+      </p>
+
+      <h3>时间线示意（纯文本，无工具）</h3>
+      <div class="wire">
+        <div class="wire-row">
+          <div class="who cli">client</div>
+          <div class="pkt">POST /v1/chat/completions  { stream: true, messages, tools }</div>
+        </div>
+        <div class="wire-row">
+          <div class="who srv">server</div>
+          <div class="pkt">delta.content = <em>"I'll"</em></div>
+        </div>
+        <div class="wire-row">
+          <div class="who srv">server</div>
+          <div class="pkt">delta.content = <em>" create"</em></div>
+        </div>
+        <div class="wire-row">
+          <div class="who srv">server</div>
+          <div class="pkt">delta.content = <em>" hello.ts"</em></div>
+        </div>
+        <div class="wire-row">
+          <div class="who srv">server</div>
+          <div class="pkt">finish_reason = <em>"stop"</em> · 然后 [DONE]</div>
+        </div>
+        <div class="wire-row">
+          <div class="who cli">client</div>
+          <div class="pkt">拼出完整 content → 无 tool_calls → 结束本轮</div>
+        </div>
+      </div>
+    </section>
+
+    <section id="assemble">
+      <h2><span class="num">03</span> 难点：tool_call 也是「碎片」</h2>
+      <p>
+        若模型决定调用 <code class="inline">write</code>，参数 JSON 不会一个 chunk 给全。
+        而是拆成很多小片段——和文字一样，也是边生成边推：
+      </p>
+      <pre><span class="c">// chunk 1</span>
+delta.tool_calls[0] = { index: <span class="n">0</span>, id: <span class="s">"call_abc"</span>, function: { name: <span class="s">"write"</span>, arguments: <span class="s">""</span> } }
+
+<span class="c">// chunk 2</span>
+delta.tool_calls[0] = { index: <span class="n">0</span>, function: { arguments: <span class="s">'{"path":'</span> } }
+
+<span class="c">// chunk 3</span>
+delta.tool_calls[0] = { index: <span class="n">0</span>, function: { arguments: <span class="s">'"hello.ts",'</span> } }
+
+<span class="c">// chunk 4</span>
+delta.tool_calls[0] = { index: <span class="n">0</span>, function: { arguments: <span class="s">'"content":"hi"}'</span> }
+
+<span class="c">// 最后 finish_reason = "tool_calls"</span></pre>
+      <div class="callout">
+        <strong>绝对不能</strong>在参数还没拼完时就 <code class="inline">executeTool</code>——
+        半截 JSON 会 <code class="inline">JSON.parse</code> 失败，或者写坏文件。
+        mini-pi 用 <code class="inline">Map&lt;index, {id,name,arguments}&gt;</code> 累加，
+        流结束后再变成完整的 <code class="inline">tool_calls</code>，然后才进 agent loop 的执行阶段。
+      </div>
+      <p>所以 streaming 下的一轮其实是：</p>
+      <ul class="plain">
+        <li><strong>收流</strong>：content 增量打印；tool 参数静默拼接</li>
+        <li><strong>收完</strong>：得到完整 assistant message（和一次非流式返回的形状一样）</li>
+        <li><strong>执行工具</strong>（若有）→ 结果塞回 messages → 再开下一轮 stream</li>
+      </ul>
+      <p>
+        并行多个工具时，用 <code class="inline">tool_calls[].index</code> 区分第 0、1、2 个调用，各自累加。
+      </p>
+    </section>
+
+    <section id="demo">
+      <h2><span class="num">04</span> 交互演示</h2>
+      <p>模拟一次「创建 hello.ts」：文字先流出来，再组装 write 的参数，最后执行工具。</p>
+      <div class="demo">
+        <div class="demo-term" id="demo-term"><span class="prompt">$ mini-pi -p "create hello.ts"</span>
+</div>
+        <div class="demo-meta">
+          <span>phase: <strong id="demo-phase">idle</strong></span>
+          <span>assembled args: <strong id="demo-args">—</strong></span>
+        </div>
+        <div class="demo-controls">
+          <button type="button" class="primary" id="demo-play">▶ 播放</button>
+          <button type="button" id="demo-step">单步</button>
+          <button type="button" id="demo-reset">重置</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="code">
+      <h2><span class="num">05</span> mini-pi 里怎么写</h2>
+      <h3>打开 stream</h3>
+      <pre><span class="k">const</span> stream = <span class="k">await</span> client.chat.completions.<span class="f">create</span>({
+  model,
+  messages,
+  tools: toolDefinitions,
+  tool_choice: <span class="s">"auto"</span>,
+  stream: <span class="k">true</span>,  <span class="c">// ← 就这一个开关</span>
+});</pre>
+
+      <h3>累加 content + tool_calls</h3>
+      <pre><span class="k">let</span> content = <span class="s">""</span>;
+<span class="k">const</span> tools = <span class="k">new</span> <span class="f">Map</span>&lt;<span class="n">number</span>, { id: <span class="n">string</span>; name: <span class="n">string</span>; arguments: <span class="n">string</span> }&gt;();
+
+<span class="k">for await</span> (<span class="k">const</span> chunk <span class="k">of</span> stream) {
+  <span class="k">const</span> delta = chunk.choices[<span class="n">0</span>]?.delta;
+  <span class="k">if</span> (delta?.content) {
+    content += delta.content;
+    onEvent?.({ type: <span class="s">"text_delta"</span>, text: delta.content });  <span class="c">// 立刻打到终端</span>
+  }
+  <span class="k">for</span> (<span class="k">const</span> tc <span class="k">of</span> delta?.tool_calls ?? []) {
+    <span class="k">const</span> acc = tools.<span class="f">get</span>(tc.index) ?? { id: <span class="s">""</span>, name: <span class="s">""</span>, arguments: <span class="s">""</span> };
+    <span class="k">if</span> (tc.id) acc.id = tc.id;
+    <span class="k">if</span> (tc.function?.name) acc.name += tc.function.name;
+    <span class="k">if</span> (tc.function?.arguments) acc.arguments += tc.function.arguments;
+    tools.<span class="f">set</span>(tc.index, acc);
+  }
+}
+<span class="c">// 流结束后 tools 才变成可执行的 tool_calls</span></pre>
+
+      <h3>CLI 怎么「打字」</h3>
+      <p>
+        <code class="inline">text_delta</code> 事件里直接 <code class="inline">process.stdout.write(delta)</code>，
+        <strong>不要</strong>每次 println——否则一个 token 一行，会很难看。
+        工具开始前再补换行。
+      </p>
+      <pre><span class="c"># 默认开流式</span>
+npm run dev -- -p <span class="s">"写个 hello.ts"</span>
+
+<span class="c"># 对比：整包返回</span>
+npm run dev -- --no-stream -p <span class="s">"写个 hello.ts"</span></pre>
+    </section>
+
+    <section id="pitfalls">
+      <h2><span class="num">06</span> 常见坑</h2>
+      <table>
+        <thead>
+          <tr><th>坑</th><th>说明</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>半截 JSON 就执行</td>
+            <td>必须等流结束（或 finish_reason）再 run tool</td>
+          </tr>
+          <tr>
+            <td>丢掉 index</td>
+            <td>多工具并行时，按 index 分别累加 arguments</td>
+          </tr>
+          <tr>
+            <td>name 也可能分片</td>
+            <td>少数后端会把函数名拆开；用 <code class="inline">+=</code> 更稳</td>
+          </tr>
+          <tr>
+            <td>和历史消息的关系</td>
+            <td>写入 messages 的仍是<strong>完整</strong> assistant 消息，不是一堆 chunk</td>
+          </tr>
+          <tr>
+            <td>免费模型 / 代理</td>
+            <td>有的 endpoint 流式不稳；可用 <code class="inline">--no-stream</code> 对照排查</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="callout">
+        <strong>一句话：</strong>Streaming = 传输层优化；Agent loop = 控制流。
+        别把两者揉成一锅——先拼出和「非流式」一样的 message，再走原来的工具循环。
+      </div>
+    </section>
+
+    <footer>
+      <span><a href="./index.html">← 返回总览</a></span>
+      <span>mini-pi · MIT · 仅供学习</span>
+    </footer>
+  </div>
+
+  <script>
+    (function () {
+      const term = document.getElementById("demo-term");
+      const phaseEl = document.getElementById("demo-phase");
+      const argsEl = document.getElementById("demo-args");
+
+      // Scripted timeline of one streaming turn + tool
+      const events = [
+        { phase: "text stream", sleep: 80, kind: "text", t: "I'll create " },
+        { phase: "text stream", sleep: 70, kind: "text", t: "hello.ts " },
+        { phase: "text stream", sleep: 70, kind: "text", t: "for you.\n" },
+        { phase: "tool assemble", sleep: 90, kind: "tool_meta", t: "→ write " },
+        { phase: "tool assemble", sleep: 55, kind: "args", t: '{"path":' },
+        { phase: "tool assemble", sleep: 55, kind: "args", t: '"hello.ts",' },
+        { phase: "tool assemble", sleep: 55, kind: "args", t: '"content":' },
+        { phase: "tool assemble", sleep: 55, kind: "args", t: '"console.log(\'hello\')"}' },
+        { phase: "stream done", sleep: 200, kind: "note", t: "\n  (stream finished — args complete)\n" },
+        { phase: "execute tool", sleep: 350, kind: "result", t: "← write\n  Wrote 26 chars to hello.ts\n" },
+        { phase: "next turn", sleep: 80, kind: "text", t: "Done — hello.ts prints hello.\n" },
+        { phase: "done", sleep: 0, kind: "end" },
+      ];
+
+      let i = 0;
+      let playing = false;
+      let argsBuf = "";
+      let timer = null;
+
+      function reset() {
+        playing = false;
+        if (timer) clearTimeout(timer);
+        timer = null;
+        i = 0;
+        argsBuf = "";
+        term.innerHTML = '<span class="prompt">$ mini-pi -p "create hello.ts"</span>\n';
+        phaseEl.textContent = "idle";
+        argsEl.textContent = "—";
+      }
+
+      function append(html) {
+        // remove cursor if present
+        const cur = term.querySelector(".cursor");
+        if (cur) cur.remove();
+        term.insertAdjacentHTML("beforeend", html);
+        term.insertAdjacentHTML("beforeend", '<span class="cursor"></span>');
+        term.scrollTop = term.scrollHeight;
+      }
+
+      function step() {
+        if (i >= events.length) {
+          playing = false;
+          const cur = term.querySelector(".cursor");
+          if (cur) cur.remove();
+          return false;
+        }
+        const e = events[i++];
+        phaseEl.textContent = e.phase;
+
+        if (e.kind === "text") {
+          append('<span class="assistant">' + escapeHtml(e.t) + "</span>");
+        } else if (e.kind === "tool_meta") {
+          append('<span class="tool">' + escapeHtml(e.t) + "</span>");
+        } else if (e.kind === "args") {
+          argsBuf += e.t;
+          argsEl.textContent = argsBuf.length > 48 ? "…" + argsBuf.slice(-48) : argsBuf;
+          append('<span class="tool">' + escapeHtml(e.t) + "</span>");
+        } else if (e.kind === "note") {
+          append('<span class="prompt">' + escapeHtml(e.t) + "</span>");
+        } else if (e.kind === "result") {
+          append('<span class="result">' + escapeHtml(e.t) + "</span>");
+        } else if (e.kind === "end") {
+          const cur = term.querySelector(".cursor");
+          if (cur) cur.remove();
+          playing = false;
+          return false;
+        }
+        return true;
+      }
+
+      function escapeHtml(s) {
+        return s
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/\n/g, "\n");
+      }
+
+      function play() {
+        if (playing) return;
+        if (i >= events.length) reset();
+        playing = true;
+        function tick() {
+          if (!playing) return;
+          const cont = step();
+          if (!cont) {
+            playing = false;
+            return;
+          }
+          const delay = events[i - 1]?.sleep ?? 80;
+          timer = setTimeout(tick, delay);
+        }
+        tick();
+      }
+
+      document.getElementById("demo-play").addEventListener("click", play);
+      document.getElementById("demo-step").addEventListener("click", () => {
+        playing = false;
+        if (timer) clearTimeout(timer);
+        if (i >= events.length) reset();
+        step();
+      });
+      document.getElementById("demo-reset").addEventListener("click", reset);
+      reset();
+    })();
+  </script>
+</body>
+</html>

@@ -1,5 +1,6 @@
 import type OpenAI from "openai";
 import type {
+  ChatCompletionChunk,
   ChatCompletionMessageParam,
   ChatCompletionMessageToolCall,
 } from "openai/resources/chat/completions";
@@ -11,27 +12,46 @@ export type AgentOptions = {
   model: string;
   cwd: string;
   maxTurns?: number;
+  /** Default true — tokens / tool-arg fragments arrive as they generate. */
+  stream?: boolean;
   /** Called for each assistant text chunk / tool event (for CLI logging). */
   onEvent?: (event: AgentEvent) => void;
 };
 
 export type AgentEvent =
+  | { type: "text_delta"; text: string }
   | { type: "text"; text: string }
+  | { type: "tool_call_delta"; index: number; name?: string; argsDelta?: string }
   | { type: "tool_call"; name: string; args: string }
   | { type: "tool_result"; name: string; ok: boolean; output: string }
   | { type: "turn"; turn: number };
 
+type AccumToolCall = {
+  id: string;
+  name: string;
+  arguments: string;
+};
+
 /**
- * Classic tool loop (Pi-style core):
- *   user → model → [tool_calls → execute → tool results] → model → ...
- * until the model stops requesting tools.
+ * Classic tool loop (Pi-style core), with optional streaming:
+ *   user → model (stream) → assemble tool_calls → execute → … → done
+ *
+ * Streaming only changes *how* we receive the assistant message.
+ * The loop structure is identical to non-streaming.
  */
 export async function runAgent(
   options: AgentOptions,
   userMessage: string,
   history: ChatCompletionMessageParam[] = [],
 ): Promise<ChatCompletionMessageParam[]> {
-  const { client, model, cwd, maxTurns = 30, onEvent } = options;
+  const {
+    client,
+    model,
+    cwd,
+    maxTurns = 30,
+    stream = true,
+    onEvent,
+  } = options;
 
   const messages: ChatCompletionMessageParam[] = [
     { role: "system", content: buildSystemPrompt(cwd) },
@@ -42,32 +62,21 @@ export async function runAgent(
   for (let turn = 0; turn < maxTurns; turn++) {
     onEvent?.({ type: "turn", turn: turn + 1 });
 
-    const response = await client.chat.completions.create({
-      model,
-      messages,
-      tools: toolDefinitions,
-      tool_choice: "auto",
-    });
+    const { content, toolCalls } = stream
+      ? await streamCompletion(client, model, messages, onEvent)
+      : await onceCompletion(client, model, messages, onEvent);
 
-    const choice = response.choices[0];
-    if (!choice) {
-      throw new Error("Empty response from model");
-    }
-
-    const msg = choice.message;
     messages.push({
       role: "assistant",
-      content: msg.content,
-      tool_calls: msg.tool_calls,
+      content: content || null,
+      tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
     });
 
-    if (msg.content) {
-      onEvent?.({ type: "text", text: msg.content });
+    if (content) {
+      onEvent?.({ type: "text", text: content });
     }
 
-    const toolCalls = msg.tool_calls ?? [];
     if (toolCalls.length === 0) {
-      // Model finished without more tools
       return messages.filter((m) => m.role !== "system");
     }
 
@@ -81,6 +90,137 @@ export async function runAgent(
     text: `\n[stopped: reached max turns (${maxTurns})]`,
   });
   return messages.filter((m) => m.role !== "system");
+}
+
+/** Non-streaming path (kept for --no-stream / comparison). */
+async function onceCompletion(
+  client: OpenAI,
+  model: string,
+  messages: ChatCompletionMessageParam[],
+  onEvent?: (event: AgentEvent) => void,
+): Promise<{ content: string; toolCalls: ChatCompletionMessageToolCall[] }> {
+  const response = await client.chat.completions.create({
+    model,
+    messages,
+    tools: toolDefinitions,
+    tool_choice: "auto",
+  });
+
+  const choice = response.choices[0];
+  if (!choice) throw new Error("Empty response from model");
+
+  const msg = choice.message;
+  const content = msg.content ?? "";
+  if (content) {
+    // Emulate one big delta so CLI still "prints" something
+    onEvent?.({ type: "text_delta", text: content });
+  }
+  return { content, toolCalls: msg.tool_calls ?? [] };
+}
+
+/**
+ * Stream one assistant turn.
+ *
+ * OpenAI-compatible streams send many tiny ChatCompletionChunk objects.
+ * Text may contain:
+ *   - delta.content          → text token(s)
+ *   - delta.tool_calls[i]    → partial id / name / arguments JSON
+ *
+ * We must *assemble* tool_calls before executeTool — you can't run
+ * incomplete JSON args.
+ */
+async function streamCompletion(
+  client: OpenAI,
+  model: string,
+  messages: ChatCompletionMessageParam[],
+  onEvent?: (event: AgentEvent) => void,
+): Promise<{ content: string; toolCalls: ChatCompletionMessageToolCall[] }> {
+  const stream = await client.chat.completions.create({
+    model,
+    messages,
+    tools: toolDefinitions,
+    tool_choice: "auto",
+    stream: true,
+  });
+
+  let content = "";
+  const tools = new Map<number, AccumToolCall>();
+
+  for await (const chunk of stream) {
+    applyChunk(chunk, {
+      onContent(delta) {
+        content += delta;
+        onEvent?.({ type: "text_delta", text: delta });
+      },
+      onToolDelta(index, partial) {
+        let acc = tools.get(index);
+        if (!acc) {
+          acc = { id: "", name: "", arguments: "" };
+          tools.set(index, acc);
+        }
+        if (partial.id) acc.id = partial.id;
+        if (partial.name) {
+          acc.name += partial.name;
+          onEvent?.({
+            type: "tool_call_delta",
+            index,
+            name: partial.name,
+          });
+        }
+        if (partial.arguments) {
+          acc.arguments += partial.arguments;
+          onEvent?.({
+            type: "tool_call_delta",
+            index,
+            argsDelta: partial.arguments,
+          });
+        }
+      },
+    });
+  }
+
+  const toolCalls: ChatCompletionMessageToolCall[] = [...tools.entries()]
+    .sort(([a], [b]) => a - b)
+    .map(([, t]) => ({
+      id: t.id || `call_${Math.random().toString(36).slice(2, 10)}`,
+      type: "function" as const,
+      function: {
+        name: t.name,
+        arguments: t.arguments || "{}",
+      },
+    }));
+
+  return { content, toolCalls };
+}
+
+type ChunkHandlers = {
+  onContent: (delta: string) => void;
+  onToolDelta: (
+    index: number,
+    partial: { id?: string; name?: string; arguments?: string },
+  ) => void;
+};
+
+function applyChunk(chunk: ChatCompletionChunk, h: ChunkHandlers): void {
+  const choice = chunk.choices[0];
+  if (!choice) return;
+  const delta = choice.delta;
+  if (!delta) return;
+
+  if (typeof delta.content === "string" && delta.content.length > 0) {
+    h.onContent(delta.content);
+  }
+
+  if (delta.tool_calls) {
+    for (const tc of delta.tool_calls) {
+      const index = tc.index ?? 0;
+      h.onToolDelta(index, {
+        id: tc.id,
+        name: tc.function?.name,
+        arguments: tc.function?.arguments,
+      });
+    }
+  }
 }
 
 async function handleToolCall(

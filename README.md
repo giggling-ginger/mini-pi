@@ -6,7 +6,10 @@
 
 A **minimal Pi-inspired coding agent** for learning how agent harnesses work.
 
-**讲解网页：** 打开 [`docs/index.html`](./docs/index.html)（本地双击即可），或看 [GitHub Pages](https://giggling-ginger.github.io/mini-pi/)（启用后）。
+**讲解网页：**
+
+- 总览：[docs/index.html](./docs/index.html) · [Pages](https://giggling-ginger.github.io/mini-pi/)
+- **Streaming 原理**：[docs/streaming.html](./docs/streaming.html) · [Pages](https://giggling-ginger.github.io/mini-pi/streaming.html)
 
 Philosophy (inspired by [Pi](https://pi.dev)):
 
@@ -121,10 +124,20 @@ This is the entire core of almost every coding agent.
 | `/reset` | Clear chat history   |
 | `/help`  | Show help            |
 
+## Streaming
+
+Default **on**. Tokens print as they arrive; tool-call JSON is assembled from deltas before any tool runs.
+
+```bash
+npm run dev -- -p "写个 hello.ts"              # stream
+npm run dev -- --no-stream -p "写个 hello.ts"  # wait for full reply
+```
+
+How it works (wire diagram + interactive demo): **[docs/streaming.html](./docs/streaming.html)**.
+
 ## What this intentionally does **not** have
 
 - Session files / resume
-- Streaming tokens
 - Permissions / sandbox
 - Extensions / skills / MCP
 - Subagents / plan mode
@@ -134,11 +147,10 @@ Add those later if you want — starting minimal is the point.
 
 ## Next steps (if you extend it)
 
-1. **Streaming** — `stream: true` on chat completions
-2. **Session JSONL** — save messages to disk, `--continue`
-3. **AGENTS.md** — inject project instructions into system prompt
-4. **Extensions** — load extra tools from `~/.mini-pi/extensions/`
-5. **Context compaction** — summarize old turns when near context limit
+1. **Session JSONL** — save messages to disk, `--continue`
+2. **AGENTS.md** — inject project instructions into system prompt
+3. **Extensions** — load extra tools from `~/.mini-pi/extensions/`
+4. **Context compaction** — summarize old turns when near context limit
 
 ## License
 

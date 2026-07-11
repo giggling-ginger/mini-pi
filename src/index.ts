@@ -6,6 +6,7 @@
  *   mini-pi                        # interactive REPL
  *   mini-pi "list ts files"        # single-shot
  *   mini-pi -p "..."               # print mode (same as single-shot)
+ *   mini-pi --no-stream -p "..."   # wait for full response each turn
  */
 import readline from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
@@ -23,9 +24,10 @@ Usage:
   mini-pi [options] [prompt...]
 
 Options:
-  -p, --print     Single-shot: run prompt and exit
-  -h, --help      Show help
-  -c, --cwd DIR   Working directory (default: current)
+  -p, --print       Single-shot: run prompt and exit
+  --no-stream       Disable token streaming (wait for full reply each turn)
+  -h, --help        Show help
+  -c, --cwd DIR     Working directory (default: current)
 
 Env (need a real API — SuperGrok/Codex sub is not enough):
   PROVIDER           openai | openrouter | ollama | xai
@@ -38,11 +40,13 @@ Env (need a real API — SuperGrok/Codex sub is not enough):
 Examples:
   PROVIDER=ollama MODEL=llama3.2 mini-pi -p "List files"
   mini-pi "List files in src/"
-  mini-pi                 # interactive
+  mini-pi --no-stream -p "hi"   # compare with streaming
+  mini-pi                       # interactive
 `.trim();
 
 function parseArgs(argv: string[]) {
   let print = false;
+  let stream = true;
   let cwd = process.cwd();
   const rest: string[] = [];
 
@@ -51,6 +55,10 @@ function parseArgs(argv: string[]) {
     if (a === "-h" || a === "--help") return { help: true as const };
     if (a === "-p" || a === "--print") {
       print = true;
+      continue;
+    }
+    if (a === "--no-stream") {
+      stream = false;
       continue;
     }
     if (a === "-c" || a === "--cwd") {
@@ -64,40 +72,70 @@ function parseArgs(argv: string[]) {
     rest.push(a);
   }
 
-  return { help: false as const, print, cwd, prompt: rest.join(" ").trim() };
+  return { help: false as const, print, stream, cwd, prompt: rest.join(" ").trim() };
 }
 
-function formatEvent(event: AgentEvent): void {
-  switch (event.type) {
-    case "text":
-      process.stdout.write(event.text);
-      if (!event.text.endsWith("\n")) process.stdout.write("\n");
-      break;
-    case "tool_call": {
-      let preview = event.args;
-      try {
-        preview = JSON.stringify(JSON.parse(event.args));
-      } catch {
-        /* keep raw */
+/** Track whether we already printed a newline after streaming text. */
+function createEventPrinter() {
+  let inTextStream = false;
+  let toolArgsPreview = "";
+
+  return function formatEvent(event: AgentEvent): void {
+    switch (event.type) {
+      case "text_delta":
+        if (!inTextStream) {
+          // leave tool lines above, start assistant text
+          inTextStream = true;
+        }
+        process.stdout.write(event.text);
+        break;
+
+      case "text":
+        // full text already printed via deltas (or one-shot in --no-stream)
+        if (inTextStream) {
+          if (!event.text.endsWith("\n")) process.stdout.write("\n");
+          inTextStream = false;
+        }
+        break;
+
+      case "tool_call_delta":
+        // Quiet by default — args JSON is noisy. Uncomment for debug:
+        // process.stderr.write(event.argsDelta ?? event.name ?? "");
+        if (event.argsDelta) toolArgsPreview += event.argsDelta;
+        break;
+
+      case "tool_call": {
+        if (inTextStream) {
+          process.stdout.write("\n");
+          inTextStream = false;
+        }
+        let preview = event.args;
+        try {
+          preview = JSON.stringify(JSON.parse(event.args));
+        } catch {
+          /* keep raw */
+        }
+        if (preview.length > 200) preview = preview.slice(0, 200) + "…";
+        console.log(`\x1b[36m→ ${event.name}\x1b[0m ${preview}`);
+        toolArgsPreview = "";
+        break;
       }
-      if (preview.length > 200) preview = preview.slice(0, 200) + "…";
-      console.log(`\x1b[36m→ ${event.name}\x1b[0m ${preview}`);
-      break;
+
+      case "tool_result": {
+        const color = event.ok ? "\x1b[32m" : "\x1b[31m";
+        const lines = event.output.split("\n");
+        const head =
+          lines.length > 12
+            ? lines.slice(0, 12).join("\n") + `\n… (${lines.length - 12} more lines)`
+            : event.output;
+        console.log(`${color}← ${event.name}\x1b[0m\n${indent(head)}`);
+        break;
+      }
+
+      case "turn":
+        break;
     }
-    case "tool_result": {
-      const color = event.ok ? "\x1b[32m" : "\x1b[31m";
-      const lines = event.output.split("\n");
-      const head =
-        lines.length > 12
-          ? lines.slice(0, 12).join("\n") + `\n… (${lines.length - 12} more lines)`
-          : event.output;
-      console.log(`${color}← ${event.name}\x1b[0m\n${indent(head)}`);
-      break;
-    }
-    case "turn":
-      // quiet by default
-      break;
-  }
+  };
 }
 
 function indent(s: string): string {
@@ -119,14 +157,15 @@ async function main() {
   const cwd = args.cwd;
 
   console.error(
-    `mini-pi  provider=${config.provider}  model=${config.model}  cwd=${cwd}`,
+    `mini-pi  provider=${config.provider}  model=${config.model}  stream=${args.stream}  cwd=${cwd}`,
   );
 
   const agentOpts = {
     client,
     model: config.model,
     cwd,
-    onEvent: formatEvent,
+    stream: args.stream,
+    onEvent: createEventPrinter(),
   };
 
   // Single-shot
@@ -143,7 +182,10 @@ async function main() {
   const rl = readline.createInterface({ input, output, terminal: true });
   let history: ChatCompletionMessageParam[] = [];
 
-  console.log("Type a task (empty or /exit to quit, /reset to clear history).\n");
+  console.log(
+    "Type a task (empty or /exit to quit, /reset to clear history).\n" +
+      "Tokens stream as they arrive (use --no-stream to disable).\n",
+  );
 
   while (true) {
     let line: string;
@@ -165,7 +207,9 @@ async function main() {
     }
 
     try {
-      history = await runAgent(agentOpts, line, history);
+      // fresh printer each turn so stream state resets
+      const opts = { ...agentOpts, onEvent: createEventPrinter() };
+      history = await runAgent(opts, line, history);
     } catch (err) {
       console.error("Error:", err instanceof Error ? err.message : err);
     }
