@@ -17,6 +17,7 @@ import type { ChatCompletionMessageParam } from "openai/resources/chat/completio
 import { runAgent, type AgentEvent } from "./agent.js";
 import { loadDotEnv } from "./env.js";
 import { createClient, loadLlmConfig } from "./llm.js";
+import { estimateTokens, maybeCompact } from "./compact.js";
 import { loadContextFiles } from "./context-files.js";
 import {
   Session,
@@ -53,11 +54,18 @@ Project instructions:
   --no-context-files     Do not load AGENTS.md / CLAUDE.md into system prompt
   -nc                    Short for --no-context-files
 
+Compaction (fold old turns when history is large):
+  --no-compact           Disable automatic compaction
+  --compact-threshold N  Estimate-token threshold to trigger (default 8000)
+  --compact-keep N       Keep ~N recent tokens after compact (default 3000)
+
 REPL commands:
   /exit /quit    Quit
   /reset         New empty session file (keeps old file on disk)
   /session       Show current session path + id
   /context       Show loaded AGENTS.md (etc.) paths
+  /compact       Force-compact history now (local extractive if you want offline)
+  /tokens        Show estimated history tokens
   /help          This help
 
 Examples:
@@ -67,6 +75,7 @@ Examples:
   mini-pi --session 2026-07-11
   mini-pi --no-session -p "ephemeral task"
   mini-pi -nc -p "ignore AGENTS.md this run"
+  mini-pi --compact-threshold 4000 -c
 `.trim();
 
 type Args = {
@@ -82,6 +91,9 @@ type Args = {
   noSession: boolean;
   listSessions: boolean;
   noContextFiles: boolean;
+  noCompact: boolean;
+  compactThreshold: number;
+  compactKeep: number;
 };
 
 function parseArgs(argv: string[]): Args {
@@ -95,6 +107,9 @@ function parseArgs(argv: string[]): Args {
   let noSession = false;
   let listSessionsFlag = false;
   let noContextFiles = false;
+  let noCompact = false;
+  let compactThreshold = Number(process.env.COMPACT_THRESHOLD) || 8000;
+  let compactKeep = Number(process.env.COMPACT_KEEP) || 3000;
   const rest: string[] = [];
 
   for (let i = 0; i < argv.length; i++) {
@@ -111,6 +126,9 @@ function parseArgs(argv: string[]): Args {
         noSession: false,
         listSessions: false,
         noContextFiles: false,
+        noCompact: false,
+        compactThreshold: 8000,
+        compactKeep: 3000,
       };
     }
     if (a === "-p" || a === "--print") {
@@ -158,6 +176,18 @@ function parseArgs(argv: string[]): Args {
       noContextFiles = true;
       continue;
     }
+    if (a === "--no-compact") {
+      noCompact = true;
+      continue;
+    }
+    if (a === "--compact-threshold") {
+      compactThreshold = Number(argv[++i]) || compactThreshold;
+      continue;
+    }
+    if (a === "--compact-keep") {
+      compactKeep = Number(argv[++i]) || compactKeep;
+      continue;
+    }
     if (a.startsWith("-")) {
       console.error(`Unknown option: ${a}`);
       process.exit(1);
@@ -178,6 +208,9 @@ function parseArgs(argv: string[]): Args {
     noSession,
     listSessions: listSessionsFlag,
     noContextFiles,
+    noCompact,
+    compactThreshold,
+    compactKeep,
   };
 }
 
@@ -229,6 +262,16 @@ function createEventPrinter() {
       }
 
       case "turn":
+        break;
+
+      case "compact":
+        console.error(
+          `\x1b[35m⚙ compact\x1b[0m  ~${event.beforeTokens} → ~${event.afterTokens} tokens` +
+            `  (folded ${event.foldedCount} msgs)`,
+        );
+        if (event.summaryPreview) {
+          console.error(`  ${event.summaryPreview}…`);
+        }
         break;
     }
   };
@@ -382,16 +425,34 @@ async function main() {
     console.error(`  context none (no AGENTS.md / CLAUDE.md found)`);
   }
 
+  const compactOptions = {
+    threshold: args.compactThreshold,
+    keepRecent: args.compactKeep,
+  };
+
   const agentOpts = {
     client,
     model: config.model,
     cwd,
     stream: args.stream,
     loadContextFiles: !args.noContextFiles,
+    compact: !args.noCompact,
+    compactOptions,
     onEvent: createEventPrinter(),
   };
 
   let history: ChatCompletionMessageParam[] = session?.history ?? [];
+
+  if (!args.noCompact) {
+    console.error(
+      `  compact on  threshold~${args.compactThreshold}  keep~${args.compactKeep}` +
+        (history.length
+          ? `  history~${estimateTokens(history)} tok / ${history.length} msgs`
+          : ""),
+    );
+  } else {
+    console.error(`  compact off`);
+  }
 
   async function runTurn(prompt: string): Promise<void> {
     const opts = { ...agentOpts, onEvent: createEventPrinter() };
@@ -414,7 +475,7 @@ async function main() {
 
   console.log(
     "Type a task (empty or /exit to quit).\n" +
-      "Sessions · AGENTS.md auto-loaded  ·  /session  /context  /reset  /help\n",
+      "Sessions · AGENTS.md · compact  ·  /session  /context  /tokens  /compact  /help\n",
   );
 
   while (true) {
@@ -466,6 +527,42 @@ async function main() {
         for (const f of contextFiles) {
           console.log(`${f.displayPath}  (${f.chars} chars)`);
         }
+      }
+      continue;
+    }
+
+    if (line === "/tokens") {
+      const tok = estimateTokens(history);
+      console.log(
+        `history ≈ ${tok} tokens · ${history.length} messages` +
+          (args.noCompact
+            ? " · compact off"
+            : ` · threshold ${args.compactThreshold}`),
+      );
+      continue;
+    }
+
+    if (line === "/compact") {
+      try {
+        const result = await maybeCompact(client, config.model, history, {
+          ...compactOptions,
+          force: true,
+        });
+        if (!result.compacted) {
+          console.log("Nothing to compact (history too short).");
+        } else {
+          history = result.history;
+          session?.syncFromHistory(history);
+          console.log(
+            `Compacted ~${result.beforeTokens} → ~${result.afterTokens} tokens` +
+              ` (folded ${result.foldedCount} msgs)`,
+          );
+          if (result.summaryPreview) {
+            console.log(`  ${result.summaryPreview}…`);
+          }
+        }
+      } catch (err) {
+        console.error("Compact failed:", err instanceof Error ? err.message : err);
       }
       continue;
     }

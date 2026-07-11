@@ -12,6 +12,7 @@ A **minimal Pi-inspired coding agent** for learning how agent harnesses work.
 - **Streaming 原理**：[docs/streaming.html](./docs/streaming.html) · [Pages](https://giggling-ginger.github.io/mini-pi/streaming.html)
 - **Sessions 原理**：[docs/sessions.html](./docs/sessions.html) · [Pages](https://giggling-ginger.github.io/mini-pi/sessions.html)
 - **AGENTS.md 原理**：[docs/agents.html](./docs/agents.html) · [Pages](https://giggling-ginger.github.io/mini-pi/agents.html)
+- **Compaction 原理**：[docs/compact.html](./docs/compact.html) · [Pages](https://giggling-ginger.github.io/mini-pi/compact.html)
 
 Philosophy (inspired by [Pi](https://pi.dev)):
 
@@ -169,6 +170,20 @@ npm run dev -- -nc -p "same task without AGENTS.md"
 
 How discovery + injection works: **[docs/agents.html](./docs/agents.html)**.
 
+## Compaction
+
+When estimated history tokens exceed a threshold (default ~8000), older turns are folded into a summary pair; recent messages stay verbatim.
+
+```bash
+npm run dev -- --compact-threshold 4000
+# REPL:
+#   /tokens
+#   /compact
+npm run dev -- --no-compact   # disable
+```
+
+How it works: **[docs/compact.html](./docs/compact.html)**.
+
 ## Streaming
 
 Default **on**. Tokens print as they arrive; tool-call JSON is assembled from deltas before any tool runs.
@@ -191,8 +206,8 @@ How it works (wire diagram + interactive demo): **[docs/streaming.html](./docs/s
 ## Next steps (if you extend it)
 
 1. **Extensions** — load extra tools from `~/.mini-pi/extensions/`
-2. **Context compaction** — summarize old turns when near context limit
-3. **Session branch/tree** — fork a session like Pi
+2. **Session branch/tree** — fork a session like Pi
+3. **Better token counting** — real tokenizer instead of chars/4
 
 ## License
 

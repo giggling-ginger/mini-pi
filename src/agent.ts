@@ -4,6 +4,7 @@ import type {
   ChatCompletionMessageParam,
   ChatCompletionMessageToolCall,
 } from "openai/resources/chat/completions";
+import { maybeCompact, type CompactOptions } from "./compact.js";
 import { executeTool, toolDefinitions } from "./tools.js";
 import { buildSystemPrompt } from "./system.js";
 
@@ -16,6 +17,9 @@ export type AgentOptions = {
   stream?: boolean;
   /** Load AGENTS.md / CLAUDE.md into the system prompt (default true). */
   loadContextFiles?: boolean;
+  /** Context compaction when history is large (default true). */
+  compact?: boolean;
+  compactOptions?: CompactOptions;
   /** Called for each assistant text chunk / tool event (for CLI logging). */
   onEvent?: (event: AgentEvent) => void;
 };
@@ -26,7 +30,14 @@ export type AgentEvent =
   | { type: "tool_call_delta"; index: number; name?: string; argsDelta?: string }
   | { type: "tool_call"; name: string; args: string }
   | { type: "tool_result"; name: string; ok: boolean; output: string }
-  | { type: "turn"; turn: number };
+  | { type: "turn"; turn: number }
+  | {
+      type: "compact";
+      beforeTokens: number;
+      afterTokens: number;
+      foldedCount: number;
+      summaryPreview: string;
+    };
 
 type AccumToolCall = {
   id: string;
@@ -53,6 +64,8 @@ export async function runAgent(
     maxTurns = 30,
     stream = true,
     loadContextFiles = true,
+    compact = true,
+    compactOptions,
     onEvent,
   } = options;
 
@@ -60,10 +73,26 @@ export async function runAgent(
     disabled: !loadContextFiles,
   });
 
+  let hist = history.filter((m) => m.role !== "system");
+
+  if (compact) {
+    const result = await maybeCompact(client, model, hist, compactOptions);
+    hist = result.history.filter((m) => m.role !== "system");
+    if (result.compacted) {
+      onEvent?.({
+        type: "compact",
+        beforeTokens: result.beforeTokens,
+        afterTokens: result.afterTokens,
+        foldedCount: result.foldedCount,
+        summaryPreview: result.summaryPreview,
+      });
+    }
+  }
+
   const messages: ChatCompletionMessageParam[] = [
-    { role: "system", content: systemPrompt },
-    ...history.filter((m) => m.role !== "system"),
-    { role: "user", content: userMessage },
+    { role: "system" as const, content: systemPrompt },
+    ...hist,
+    { role: "user" as const, content: userMessage },
   ];
 
   for (let turn = 0; turn < maxTurns; turn++) {

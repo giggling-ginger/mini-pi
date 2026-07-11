@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Compaction 原理 · mini-pi</title>
+  <meta name="description" content="讲解 coding agent 如何在上下文将满时压缩旧对话" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #0c0e12;
+      --bg-elev: #13161d;
+      --bg-card: #171b24;
+      --border: #2a3140;
+      --text: #e8ecf4;
+      --muted: #8b95a8;
+      --faint: #5c667a;
+      --accent: #6ee7b7;
+      --cyan: #67e8f9;
+      --amber: #fbbf24;
+      --rose: #fb7185;
+      --violet: #a78bfa;
+      --magenta: #e879f9;
+      --radius: 12px;
+      --max: 820px;
+      --font: "IBM Plex Sans", system-ui, sans-serif;
+      --mono: "IBM Plex Mono", ui-monospace, monospace;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: var(--font);
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.65;
+      font-size: 16.5px;
+      -webkit-font-smoothing: antialiased;
+    }
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(232, 121, 249, 0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(232, 121, 249, 0.03) 1px, transparent 1px);
+      background-size: 48px 48px;
+      pointer-events: none;
+      z-index: 0;
+      mask-image: radial-gradient(ellipse 80% 50% at 50% 0%, black, transparent);
+    }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .wrap { position: relative; z-index: 1; max-width: var(--max); margin: 0 auto; padding: 0 1.25rem 5rem; }
+
+    nav {
+      position: sticky; top: 0; z-index: 50;
+      backdrop-filter: blur(12px);
+      background: rgba(12, 14, 18, 0.85);
+      border-bottom: 1px solid var(--border);
+      margin: 0 -1.25rem;
+      padding: 0.75rem 1.25rem;
+    }
+    nav .inner {
+      max-width: var(--max); margin: 0 auto;
+      display: flex; align-items: center; gap: 1rem;
+      flex-wrap: wrap; justify-content: space-between;
+    }
+    nav .brand {
+      font-family: var(--mono); font-weight: 600; font-size: 0.95rem; color: var(--text);
+    }
+    nav .brand span { color: var(--magenta); }
+    nav .links { display: flex; gap: 0.25rem 1rem; flex-wrap: wrap; font-size: 0.85rem; }
+    nav .links a { color: var(--muted); }
+    nav .links a:hover { color: var(--text); text-decoration: none; }
+
+    header.hero { padding: 3rem 0 2rem; }
+    .badge {
+      display: inline-flex; gap: 0.4rem;
+      font-family: var(--mono); font-size: 0.72rem; font-weight: 500;
+      letter-spacing: 0.04em; text-transform: uppercase;
+      color: var(--magenta); background: rgba(232, 121, 249, 0.1);
+      border: 1px solid rgba(232, 121, 249, 0.3);
+      padding: 0.3rem 0.65rem; border-radius: 999px; margin-bottom: 1.15rem;
+    }
+    h1 {
+      font-size: clamp(1.75rem, 5vw, 2.4rem);
+      font-weight: 700; letter-spacing: -0.03em; line-height: 1.2; margin-bottom: 1rem;
+    }
+    h1 em { font-style: normal; color: var(--magenta); }
+    .lead { font-size: 1.08rem; color: var(--muted); max-width: 40em; margin-bottom: 1rem; }
+
+    section { margin-top: 3rem; scroll-margin-top: 4rem; }
+    h2 {
+      font-size: 1.3rem; font-weight: 700; letter-spacing: -0.02em;
+      margin-bottom: 0.85rem; display: flex; align-items: baseline; gap: 0.6rem;
+    }
+    h2 .num { font-family: var(--mono); font-size: 0.8rem; color: var(--magenta); font-weight: 600; }
+    h3 { font-size: 1.05rem; font-weight: 600; margin: 1.4rem 0 0.55rem; }
+    p { margin-bottom: 0.85rem; color: var(--muted); }
+    p strong, li strong { color: var(--text); font-weight: 600; }
+
+    ul.plain { list-style: none; margin: 0.75rem 0 1rem; }
+    ul.plain li {
+      position: relative; padding-left: 1.2rem; margin-bottom: 0.4rem; color: var(--muted);
+    }
+    ul.plain li::before {
+      content: "→"; position: absolute; left: 0; color: var(--magenta);
+      font-family: var(--mono); font-size: 0.85rem;
+    }
+
+    .grid-2 {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 0.85rem; margin: 1rem 0;
+    }
+    @media (max-width: 640px) { .grid-2 { grid-template-columns: 1fr; } }
+    .card {
+      background: var(--bg-card); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 1.1rem 1.15rem;
+    }
+    .card h4 {
+      font-family: var(--mono); font-size: 0.88rem; font-weight: 600;
+      margin-bottom: 0.4rem; color: var(--text);
+    }
+    .card p { font-size: 0.9rem; margin-bottom: 0; }
+
+    .callout {
+      background: linear-gradient(135deg, rgba(232, 121, 249, 0.1), rgba(110, 231, 183, 0.05));
+      border: 1px solid rgba(232, 121, 249, 0.25);
+      border-radius: var(--radius); padding: 1rem 1.15rem; margin: 1.15rem 0;
+      font-size: 0.95rem; color: var(--muted);
+    }
+    .callout strong { color: var(--magenta); }
+
+    pre, code { font-family: var(--mono); }
+    pre {
+      background: #0a0c10; border: 1px solid var(--border); border-radius: var(--radius);
+      padding: 1rem 1.1rem; overflow-x: auto; font-size: 0.78rem; line-height: 1.55;
+      margin: 0.85rem 0 1.1rem; color: #c8d0e0;
+    }
+    pre .c { color: #5c667a; }
+    pre .k { color: #c4b5fd; }
+    pre .s { color: #6ee7b7; }
+    pre .f { color: #67e8f9; }
+    pre .n { color: #fbbf24; }
+    code.inline {
+      font-size: 0.86em; background: var(--bg-card); border: 1px solid var(--border);
+      padding: 0.1em 0.35em; border-radius: 4px; color: var(--magenta);
+    }
+
+    /* meter */
+    .meter-wrap {
+      background: var(--bg-elev); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 1.15rem; margin: 1.15rem 0;
+    }
+    .meter-label {
+      display: flex; justify-content: space-between; font-family: var(--mono);
+      font-size: 0.78rem; color: var(--faint); margin-bottom: 0.45rem;
+    }
+    .meter-label strong { color: var(--magenta); font-weight: 500; }
+    .meter {
+      height: 14px; border-radius: 999px; background: #1a1f2a;
+      border: 1px solid var(--border); overflow: hidden; position: relative;
+    }
+    .meter .fill {
+      height: 100%; border-radius: 999px;
+      background: linear-gradient(90deg, var(--accent), var(--amber), var(--rose));
+      width: 20%; transition: width 0.45s ease;
+    }
+    .meter .thresh {
+      position: absolute; top: 0; bottom: 0; width: 2px; background: var(--magenta);
+      box-shadow: 0 0 8px rgba(232, 121, 249, 0.6);
+    }
+
+    /* msg list demo */
+    .msg-demo {
+      background: #0a0c10; border: 1px solid var(--border); border-radius: var(--radius);
+      max-height: 280px; overflow-y: auto; margin: 0.75rem 0;
+      font-family: var(--mono); font-size: 0.78rem;
+    }
+    .msg-row {
+      display: grid; grid-template-columns: 4.5rem 1fr; gap: 0.5rem;
+      padding: 0.35rem 0.75rem; border-left: 3px solid transparent;
+      color: var(--muted);
+    }
+    .msg-row .role { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.04em; }
+    .msg-row.user { border-left-color: #60a5fa; }
+    .msg-row.user .role { color: #93c5fd; }
+    .msg-row.assistant { border-left-color: var(--accent); }
+    .msg-row.assistant .role { color: #86efac; }
+    .msg-row.tool { border-left-color: var(--amber); }
+    .msg-row.tool .role { color: #fcd34d; }
+    .msg-row.summary { border-left-color: var(--magenta); background: rgba(232, 121, 249, 0.08); }
+    .msg-row.summary .role { color: var(--magenta); }
+    .msg-row.fade { opacity: 0.35; text-decoration: line-through; }
+    .msg-row .tx { word-break: break-word; }
+
+    .demo-controls { display: flex; gap: 0.5rem; margin-top: 0.75rem; flex-wrap: wrap; }
+    .demo-controls button {
+      font-family: var(--mono); font-size: 0.78rem; padding: 0.4rem 0.75rem;
+      border-radius: 6px; border: 1px solid var(--border); background: var(--bg-card);
+      color: var(--muted); cursor: pointer;
+    }
+    .demo-controls button:hover { color: var(--text); border-color: var(--magenta); }
+    .demo-controls button.primary {
+      background: rgba(232, 121, 249, 0.12); color: var(--magenta);
+      border-color: rgba(232, 121, 249, 0.4);
+    }
+    .demo-meta {
+      font-family: var(--mono); font-size: 0.75rem; color: var(--faint); margin-bottom: 0.5rem;
+    }
+    .demo-meta strong { color: var(--magenta); font-weight: 500; }
+
+    .split {
+      display: grid; grid-template-columns: 1fr auto 1fr; gap: 0.5rem; align-items: stretch;
+      margin: 1rem 0;
+    }
+    @media (max-width: 640px) {
+      .split { grid-template-columns: 1fr; }
+      .split .arrow { transform: rotate(90deg); text-align: center; }
+    }
+    .split .pane {
+      background: var(--bg-card); border: 1px solid var(--border);
+      border-radius: 10px; padding: 0.85rem; font-size: 0.86rem; color: var(--muted);
+    }
+    .split .pane h4 {
+      font-family: var(--mono); font-size: 0.78rem; color: var(--text); margin-bottom: 0.4rem;
+    }
+    .split .arrow {
+      font-family: var(--mono); color: var(--magenta); display: flex;
+      align-items: center; font-size: 1.2rem;
+    }
+
+    table {
+      width: 100%; border-collapse: collapse; font-size: 0.9rem; margin: 1rem 0;
+    }
+    th, td {
+      text-align: left; padding: 0.6rem 0.7rem; border-bottom: 1px solid var(--border);
+    }
+    th {
+      font-family: var(--mono); font-size: 0.72rem; color: var(--faint);
+      text-transform: uppercase; letter-spacing: 0.04em; font-weight: 500;
+    }
+    td { color: var(--muted); }
+    td:first-child { font-family: var(--mono); color: var(--text); font-size: 0.84rem; }
+
+    footer {
+      margin-top: 4rem; padding-top: 1.5rem; border-top: 1px solid var(--border);
+      font-size: 0.85rem; color: var(--faint);
+      display: flex; flex-wrap: wrap; gap: 0.75rem 1.5rem; justify-content: space-between;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <nav>
+      <div class="inner">
+        <a class="brand" href="./index.html">mini-<span>pi</span> · compact</a>
+        <div class="links">
+          <a href="./index.html">总览</a>
+          <a href="./streaming.html">Streaming</a>
+          <a href="./sessions.html">Sessions</a>
+          <a href="./agents.html">AGENTS.md</a>
+          <a href="#why">为什么</a>
+          <a href="#how">怎么压</a>
+          <a href="#demo">演示</a>
+          <a href="#cli">命令</a>
+          <a href="https://github.com/giggling-ginger/mini-pi" target="_blank" rel="noopener">GitHub ↗</a>
+        </div>
+      </div>
+    </nav>
+
+    <header class="hero">
+      <div class="badge">Compaction · Context window</div>
+      <h1>对话太长时<br />怎么把旧轮次 <em>折起来</em></h1>
+      <p class="lead">
+        模型上下文有限。Session 会越聊越长，tool 输出尤其占地方。
+        Compaction = 把<strong>较早的消息</strong>收成一段摘要，留下<strong>最近几轮原文</strong>，再继续 loop。
+      </p>
+      <p class="lead" style="font-size:0.95rem">
+        源码：<code class="inline">src/compact.ts</code>（在 <code class="inline">runAgent</code> 开头调用）
+      </p>
+    </header>
+
+    <section id="why">
+      <h2><span class="num">01</span> 为什么需要</h2>
+      <div class="grid-2">
+        <div class="card">
+          <h4>不压</h4>
+          <p>
+            messages 无限增长 → 触及模型上限 → 请求失败，或费用暴涨、模型「忘了」早期目标却仍付全价。
+          </p>
+        </div>
+        <div class="card">
+          <h4>压</h4>
+          <p>
+            旧轮次变成摘要；近期细节保留。Agent 仍知道「我们在做什么」，但 token 用量掉下来。
+          </p>
+        </div>
+      </div>
+      <div class="callout">
+        <strong>和 Session / AGENTS.md 的分工：</strong>
+        Session 负责持久化；AGENTS.md 是项目说明书；Compaction 负责<strong>历史别撑爆窗口</strong>。
+        三者正交。
+      </div>
+    </section>
+
+    <section id="how">
+      <h2><span class="num">02</span> mini-pi 怎么做</h2>
+      <ol class="plain" style="list-style:none">
+        <li><strong>估 token</strong> — 粗算 <code class="inline">chars / 4</code>（够用，不必接 tokenizer）</li>
+        <li><strong>过阈值？</strong> — 默认约 8000；可用 <code class="inline">--compact-threshold</code> 调</li>
+        <li><strong>切开</strong> — 尾部保留 ~3000 token 的「recent」，尽量从某条 <code class="inline">user</code> 切开（避免拆开 tool 链）</li>
+        <li><strong>摘要 old</strong> — 默认再调一次模型（无 tools）；失败/测试可用本地抽取摘要</li>
+        <li><strong>替换</strong> — <code class="inline">[summary user] + [ack assistant] + recent</code></li>
+      </ol>
+
+      <div class="split">
+        <div class="pane">
+          <h4>old（将被折叠）</h4>
+          <p>更早的 user / assistant / tool… 可能很长</p>
+        </div>
+        <div class="arrow">→</div>
+        <div class="pane">
+          <h4>summary 对</h4>
+          <p>一条 user 摘要 + 一条 assistant「收到」</p>
+        </div>
+      </div>
+
+      <pre><span class="c">// runAgent 开头（简化）</span>
+<span class="k">if</span> (compact) {
+  <span class="k">const</span> result = <span class="k">await</span> <span class="f">maybeCompact</span>(client, model, history, opts)
+  <span class="k">if</span> (result.compacted) {
+    history = result.history
+    onEvent({ type: <span class="s">"compact"</span>, ... })
+  }
+}
+messages = [ system, ...history, userMessage ]</pre>
+
+      <div class="callout">
+        <strong>为什么从 user 切开？</strong>
+        Assistant 的 <code class="inline">tool_calls</code> 必须和后面的 <code class="inline">role: tool</code> 成对。
+        若 recent 从半截 tool 结果开始，API 会报协议错误。
+      </div>
+    </section>
+
+    <section id="demo">
+      <h2><span class="num">03</span> 交互演示</h2>
+      <p>点「灌满历史」模拟变长，越过阈值后自动压缩（示意，非真 API）。</p>
+      <div class="meter-wrap">
+        <div class="meter-label">
+          <span>context usage (estimate)</span>
+          <span><strong id="tok-label">0</strong> / 8000 tok</span>
+        </div>
+        <div class="meter">
+          <div class="fill" id="meter-fill"></div>
+          <div class="thresh" style="left: 100%"></div>
+        </div>
+        <div class="demo-meta" style="margin-top:0.75rem">
+          phase: <strong id="phase">idle</strong> ·
+          msgs: <strong id="msg-count">0</strong>
+        </div>
+        <div class="msg-demo" id="msg-list"></div>
+        <div class="demo-controls">
+          <button type="button" class="primary" id="btn-grow">+ 加一轮对话</button>
+          <button type="button" id="btn-compact">强制压缩</button>
+          <button type="button" id="btn-reset">重置</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="cli">
+      <h2><span class="num">04</span> 命令</h2>
+      <table>
+        <thead>
+          <tr><th>命令</th><th>作用</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>（默认）</td>
+            <td>每轮 runAgent 前检查是否需要 compact</td>
+          </tr>
+          <tr>
+            <td><code class="inline">--no-compact</code></td>
+            <td>关闭</td>
+          </tr>
+          <tr>
+            <td><code class="inline">--compact-threshold N</code></td>
+            <td>触发阈值（估 token）</td>
+          </tr>
+          <tr>
+            <td><code class="inline">--compact-keep N</code></td>
+            <td>保留的 recent 体量</td>
+          </tr>
+          <tr>
+            <td><code class="inline">/tokens</code></td>
+            <td>看当前 history 估多少 token</td>
+          </tr>
+          <tr>
+            <td><code class="inline">/compact</code></td>
+            <td>立刻强制压一轮并写回 session</td>
+          </tr>
+        </tbody>
+      </table>
+      <pre>npm run dev -- --compact-threshold 4000 -c
+<span class="c"># REPL 里</span>
+/tokens
+/compact</pre>
+    </section>
+
+    <section id="pitfalls">
+      <h2><span class="num">05</span> 常见坑</h2>
+      <table>
+        <thead>
+          <tr><th>坑</th><th>说明</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>摘要丢关键细节</td>
+            <td>keepRecent 太小会丢近期代码；可调大 keep</td>
+          </tr>
+          <tr>
+            <td>估 token 不准</td>
+            <td>chars/4 是粗算；够做触发器用，不是计费精度</td>
+          </tr>
+          <tr>
+            <td>session 文件</td>
+            <td>压缩后 history 前缀变了 → mini-pi 整文件 rewrite JSONL</td>
+          </tr>
+          <tr>
+            <td>二次压缩</td>
+            <td>摘要还在，后面又变长会再压；旧摘要可能再被折进更新的摘要</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="callout">
+        <strong>一句话：</strong>Compaction = 有损压缩对话历史。
+        换空间（上下文窗口）与精度（细节）——和 zip 不同，解压不回原文。
+      </div>
+    </section>
+
+    <footer>
+      <span>
+        <a href="./index.html">← 总览</a> ·
+        <a href="./sessions.html">Sessions</a> ·
+        <a href="./agents.html">AGENTS.md</a>
+      </span>
+      <span>mini-pi · MIT · 仅供学习</span>
+    </footer>
+  </div>
+
+  <script>
+    (function () {
+      const THRESHOLD = 8000;
+      const KEEP = 3000;
+      let messages = [];
+      let phase = "idle";
+
+      const listEl = document.getElementById("msg-list");
+      const fillEl = document.getElementById("meter-fill");
+      const tokEl = document.getElementById("tok-label");
+      const phaseEl = document.getElementById("phase");
+      const countEl = document.getElementById("msg-count");
+
+      function estTok(msgs) {
+        let c = 0;
+        for (const m of msgs) c += (m.text || "").length + 8;
+        return Math.ceil(c / 4);
+      }
+
+      function render(highlightFade) {
+        const tok = estTok(messages);
+        const pct = Math.min(100, (tok / THRESHOLD) * 100);
+        fillEl.style.width = pct + "%";
+        tokEl.textContent = String(tok);
+        phaseEl.textContent = phase;
+        countEl.textContent = String(messages.length);
+
+        if (messages.length === 0) {
+          listEl.innerHTML =
+            '<div class="msg-row"><span class="role">—</span><span class="tx">empty history</span></div>';
+          return;
+        }
+        listEl.innerHTML = messages
+          .map((m, i) => {
+            const fade = highlightFade && m.fade ? " fade" : "";
+            const sum = m.role === "summary" ? " summary" : "";
+            return (
+              `<div class="msg-row ${m.role}${fade}${sum}">` +
+              `<span class="role">${m.role}</span>` +
+              `<span class="tx">${escapeHtml(m.text)}</span></div>`
+            );
+          })
+          .join("");
+        listEl.scrollTop = listEl.scrollHeight;
+      }
+
+      function escapeHtml(s) {
+        return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      }
+
+      function grow() {
+        const n = Math.floor(messages.filter((m) => m.role === "user").length);
+        messages.push({
+          role: "user",
+          text: `Step ${n}: edit module_${n}.ts and run tests ` + "…".repeat(20),
+        });
+        messages.push({
+          role: "assistant",
+          text: `Edited module_${n}.ts, ran vitest, fixed 2 failures. ` + "x".repeat(120),
+        });
+        messages.push({
+          role: "tool",
+          text: `stdout: ok ${n} ` + "log ".repeat(30),
+        });
+        phase = "grew";
+        if (estTok(messages) >= THRESHOLD) {
+          setTimeout(() => compact(true), 400);
+        } else {
+          render(false);
+        }
+        render(false);
+      }
+
+      function compact(auto) {
+        if (messages.length < 4) {
+          phase = "too short";
+          render(false);
+          return;
+        }
+        // mark old as fade then replace
+        const keepCount = Math.min(6, Math.max(2, Math.floor(messages.length / 3)));
+        const split = messages.length - keepCount;
+        const old = messages.slice(0, split);
+        const recent = messages.slice(split).map((m) => ({ ...m, fade: false }));
+        phase = auto ? "auto compact…" : "force compact…";
+        messages = messages.map((m, i) => (i < split ? { ...m, fade: true } : m));
+        render(true);
+
+        setTimeout(() => {
+          const summaryText =
+            "[Conversation summary] Goals: multi-step edits. " +
+            `Folded ${old.length} msgs covering modules 0..${old.length}. ` +
+            "Tests were being fixed iteratively.";
+          messages = [
+            { role: "summary", text: summaryText },
+            { role: "assistant", text: "Understood. Continuing with summarized context." },
+            ...recent,
+          ];
+          phase = "compacted";
+          render(false);
+        }, 600);
+      }
+
+      function reset() {
+        messages = [];
+        phase = "idle";
+        render(false);
+      }
+
+      document.getElementById("btn-grow").addEventListener("click", grow);
+      document.getElementById("btn-compact").addEventListener("click", () => compact(false));
+      document.getElementById("btn-reset").addEventListener("click", reset);
+      // start with a bit of history
+      for (let i = 0; i < 3; i++) grow();
+      phase = "idle";
+      render(false);
+    })();
+  </script>
+</body>
+</html>

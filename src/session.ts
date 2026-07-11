@@ -1,6 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
 import {
-  appendFileSync,
   existsSync,
   mkdirSync,
   readdirSync,
@@ -141,43 +140,25 @@ export class Session {
 
   /**
    * Agent returns the full non-system history after a turn.
-   * Append any new tail messages to the JSONL file.
+   * Full rewrite keeps the file correct after compaction (prefix may change).
    */
   syncFromHistory(history: ChatCompletionMessageParam[]): void {
     const next = history.filter((m) => m.role !== "system");
-    const prevLen = this.messages.length;
 
-    if (next.length < prevLen) {
-      this.rewriteAll(next);
-    } else {
-      const toAppend = next.slice(prevLen);
-      for (const message of toAppend) {
-        this.writeMessageLine(message);
-      }
-      this.messages = next;
-      if (toAppend.length > 0) {
-        this.meta.updatedAt = new Date().toISOString();
-        this.rewriteMetaKeepingMessages();
-      }
-    }
-
+    // Preserve first non-summary user title if we already have one
     if (!this.meta.title) {
-      const firstUser = next.find((m) => m.role === "user");
+      const firstUser = next.find(
+        (m) =>
+          m.role === "user" &&
+          typeof m.content === "string" &&
+          !m.content.startsWith("[Conversation summary"),
+      );
       if (firstUser && typeof firstUser.content === "string") {
         this.meta.title = truncateTitle(firstUser.content);
-        this.rewriteMetaKeepingMessages();
       }
     }
-  }
 
-  private writeMessageLine(message: ChatCompletionMessageParam): void {
-    if (message.role === "system") return;
-    const line: SessionMessageLine = {
-      type: "message",
-      ts: new Date().toISOString(),
-      message,
-    };
-    appendFileSync(this.path, JSON.stringify(line) + "\n", "utf8");
+    this.rewriteAll(next);
   }
 
   /** Full rewrite of meta + messages. */
@@ -196,22 +177,6 @@ export class Session {
     }
     writeFileSync(this.path, parts.join("\n") + "\n", "utf8");
     this.messages = clean;
-  }
-
-  /** Update meta line only; keep existing message lines as-is. */
-  private rewriteMetaKeepingMessages(): void {
-    this.meta.updatedAt = new Date().toISOString();
-    const parts = [JSON.stringify(this.meta)];
-    try {
-      const raw = readFileSync(this.path, "utf8").split("\n").filter(Boolean);
-      for (const line of raw) {
-        const obj = JSON.parse(line) as SessionLine;
-        if (obj.type === "message") parts.push(line);
-      }
-      writeFileSync(this.path, parts.join("\n") + "\n", "utf8");
-    } catch {
-      this.rewriteAll(this.messages);
-    }
   }
 }
 
