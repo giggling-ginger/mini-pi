@@ -262,75 +262,121 @@
     .tool-edit h4 { color: var(--violet); }
     .tool-bash h4 { color: var(--rose); }
 
-    /* loop diagram */
+    /* loop state diagram */
     .loop {
       background: var(--bg-elev);
       border: 1px solid var(--border);
       border-radius: var(--radius);
-      padding: 1.5rem 1.25rem;
+      padding: 1.25rem 1rem 1.1rem;
       margin: 1.25rem 0;
+    }
+    .sm-wrap {
+      width: 100%;
       overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
     }
-    .loop-steps {
-      display: flex;
-      flex-direction: column;
-      gap: 0;
-      min-width: 280px;
-    }
-    .loop-step {
-      display: grid;
-      grid-template-columns: 2.5rem 1fr;
-      gap: 0.75rem;
-      align-items: start;
-    }
-    .loop-step .rail {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      height: 100%;
-    }
-    .loop-step .dot {
-      width: 2rem;
-      height: 2rem;
-      border-radius: 50%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
+    .sm-svg {
+      display: block;
+      width: 100%;
+      min-width: 520px;
+      height: auto;
       font-family: var(--mono);
-      font-size: 0.75rem;
+    }
+    .sm-svg .edge {
+      fill: none;
+      stroke: #3a4358;
+      stroke-width: 1.75;
+      transition: stroke 0.2s, stroke-width 0.2s, opacity 0.2s;
+    }
+    .sm-svg .edge.active {
+      stroke: var(--accent);
+      stroke-width: 2.4;
+      filter: drop-shadow(0 0 4px rgba(110, 231, 183, 0.45));
+    }
+    .sm-svg .edge-label {
+      fill: var(--faint);
+      font-size: 11px;
+      transition: fill 0.2s;
+    }
+    .sm-svg .edge-label.active { fill: var(--accent); }
+    .sm-svg .node-box {
+      fill: #12161f;
+      stroke: #3a4358;
+      stroke-width: 1.5;
+      transition: fill 0.2s, stroke 0.2s, filter 0.2s;
+    }
+    .sm-svg .node-box.start-end {
+      rx: 22; ry: 22;
+    }
+    .sm-svg .node-box.process {
+      rx: 8; ry: 8;
+    }
+    .sm-svg .node-box.decision {
+      /* diamond drawn via polygon; keep stroke on path */
+    }
+    .sm-svg .node.active .node-box {
+      stroke: var(--accent);
+      fill: #143028;
+      filter: drop-shadow(0 0 10px rgba(110, 231, 183, 0.25));
+    }
+    .sm-svg .node.visited .node-box {
+      stroke: #4a7a64;
+    }
+    .sm-svg .node-title {
+      fill: #c8d0e0;
+      font-size: 13px;
       font-weight: 600;
-      flex-shrink: 0;
-      border: 1.5px solid var(--border);
+      text-anchor: middle;
+      dominant-baseline: central;
+      pointer-events: none;
+      transition: fill 0.2s;
+    }
+    .sm-svg .node-sub {
+      fill: #6b7588;
+      font-size: 10.5px;
+      text-anchor: middle;
+      dominant-baseline: central;
+      pointer-events: none;
+    }
+    .sm-svg .node.active .node-title { fill: var(--accent); }
+    .sm-svg .node.active .node-sub { fill: #8fd9b8; }
+    .sm-svg .node.done-node.active .node-box {
+      stroke: var(--cyan);
+      fill: #0f2430;
+      filter: drop-shadow(0 0 10px rgba(103, 232, 249, 0.25));
+    }
+    .sm-svg .node.done-node.active .node-title { fill: var(--cyan); }
+    .sm-svg marker path { fill: #3a4358; transition: fill 0.2s; }
+    .sm-svg marker.active path { fill: var(--accent); }
+
+    .sm-caption {
+      margin-top: 1rem;
+      padding: 0.85rem 1rem;
       background: var(--bg-card);
-      color: var(--muted);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      min-height: 4.2rem;
     }
-    .loop-step.active .dot {
-      border-color: var(--accent);
+    .sm-caption .step-tag {
+      font-family: var(--mono);
+      font-size: 0.72rem;
       color: var(--accent);
-      background: var(--accent-dim);
-      box-shadow: 0 0 0 3px rgba(110, 231, 183, 0.12);
+      font-weight: 600;
+      letter-spacing: 0.03em;
+      margin-bottom: 0.25rem;
     }
-    .loop-step .line {
-      width: 2px;
-      flex: 1;
-      min-height: 1.25rem;
-      background: var(--border);
-      margin: 0.25rem 0;
-    }
-    .loop-step:last-child .line { display: none; }
-    .loop-step .body {
-      padding-bottom: 1.15rem;
-    }
-    .loop-step .body h4 {
+    .sm-caption h4 {
       font-size: 0.95rem;
       font-weight: 600;
-      margin-bottom: 0.2rem;
+      margin-bottom: 0.25rem;
+      color: var(--text);
     }
-    .loop-step .body p {
+    .sm-caption p {
       font-size: 0.88rem;
       margin: 0;
+      color: var(--muted);
     }
-    .loop-step .body code {
+    .sm-caption code {
       font-family: var(--mono);
       font-size: 0.8rem;
       color: var(--cyan);
@@ -339,8 +385,9 @@
     .loop-controls {
       display: flex;
       gap: 0.5rem;
-      margin-top: 0.5rem;
+      margin-top: 0.85rem;
       flex-wrap: wrap;
+      align-items: center;
     }
     .loop-controls button {
       font-family: var(--mono);
@@ -355,6 +402,12 @@
     .loop-controls button:hover {
       color: var(--text);
       border-color: var(--accent);
+    }
+    .loop-controls .step-count {
+      font-family: var(--mono);
+      font-size: 0.75rem;
+      color: var(--faint);
+      margin-left: auto;
     }
 
     /* code */
@@ -600,59 +653,101 @@
     <section id="loop">
       <h2><span class="num">03</span> Agent Loop（全部核心）</h2>
       <p>
-        下面是 <code class="inline">runAgent</code> 的逻辑。点「下一步」可走一遍一次典型任务：
-        <em style="color:var(--text)">「创建一个 hello.ts」</em>。
+        <code class="inline">runAgent</code> 本质是一张<strong>状态机</strong>。
+        点「下一步」按一次典型任务走完：
+        <em style="color:var(--text)">「创建一个 hello.ts」</em>
+        （有工具调用时走回环，没有则结束）。
       </p>
 
       <div class="loop">
-        <div class="loop-steps" id="loop-steps">
-          <div class="loop-step active" data-step="0">
-            <div class="rail"><div class="dot">1</div><div class="line"></div></div>
-            <div class="body">
-              <h4>组装 messages</h4>
-              <p>system prompt +（可选）历史 + 本轮 user 消息。这是模型能看到的全部上下文。</p>
-            </div>
-          </div>
-          <div class="loop-step" data-step="1">
-            <div class="rail"><div class="dot">2</div><div class="line"></div></div>
-            <div class="body">
-              <h4>调用模型 <code>chat.completions.create</code></h4>
-              <p>带上 <code>tools</code> 定义，<code>tool_choice: "auto"</code>——让模型自己决定要不要调用工具。</p>
-            </div>
-          </div>
-          <div class="loop-step" data-step="2">
-            <div class="rail"><div class="dot">3</div><div class="line"></div></div>
-            <div class="body">
-              <h4>收到 assistant 回复</h4>
-              <p>可能有文字，也可能有 <code>tool_calls</code>（例如 write hello.ts）。把 assistant 消息 append 进数组。</p>
-            </div>
-          </div>
-          <div class="loop-step" data-step="3">
-            <div class="rail"><div class="dot">4</div><div class="line"></div></div>
-            <div class="body">
-              <h4>有 tool_calls？→ 本地执行</h4>
-              <p><code>executeTool(cwd, name, args)</code> 真正写文件 / 跑 bash。结果以 <code>role: "tool"</code> 写回 messages。</p>
-            </div>
-          </div>
-          <div class="loop-step" data-step="4">
-            <div class="rail"><div class="dot">5</div><div class="line"></div></div>
-            <div class="body">
-              <h4>回到步骤 2</h4>
-              <p>模型带着工具结果再推理。可能继续 read/edit/bash，也可能只输出总结文字。</p>
-            </div>
-          </div>
-          <div class="loop-step" data-step="5">
-            <div class="rail"><div class="dot">✓</div><div class="line"></div></div>
-            <div class="body">
-              <h4>没有 tool_calls → 结束</h4>
-              <p>返回更新后的 history。CLI 把最后的文字打印给你。默认最多 30 轮防死循环。</p>
-            </div>
-          </div>
+        <div class="sm-wrap">
+          <svg class="sm-svg" id="sm-svg" viewBox="0 0 640 420" role="img" aria-label="Agent loop state diagram">
+            <defs>
+              <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path d="M 0 0 L 10 5 L 0 10 z" />
+              </marker>
+              <marker id="arrow-active" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="#6ee7b7" />
+              </marker>
+            </defs>
+
+            <!-- edges (drawn under nodes) -->
+            <g class="edges">
+              <!-- start → assemble -->
+              <path id="e-start-assemble" class="edge" data-edge="start-assemble"
+                    d="M 320 48 L 320 68" marker-end="url(#arrow)" />
+              <!-- assemble → llm -->
+              <path id="e-assemble-llm" class="edge" data-edge="assemble-llm"
+                    d="M 320 128 L 320 158" marker-end="url(#arrow)" />
+              <!-- llm → decide -->
+              <path id="e-llm-decide" class="edge" data-edge="llm-decide"
+                    d="M 320 218 L 320 248" marker-end="url(#arrow)" />
+              <!-- decide → tools (yes, left) -->
+              <path id="e-decide-tools" class="edge" data-edge="decide-tools"
+                    d="M 256 292 L 170 292 L 170 318" marker-end="url(#arrow)" />
+              <!-- tools → llm (loop back) -->
+              <path id="e-tools-llm" class="edge" data-edge="tools-llm"
+                    d="M 170 368 L 100 368 L 100 188 L 248 188" marker-end="url(#arrow)" />
+              <!-- decide → done (no, right) -->
+              <path id="e-decide-done" class="edge" data-edge="decide-done"
+                    d="M 384 292 L 470 292 L 470 340" marker-end="url(#arrow)" />
+            </g>
+
+            <!-- edge labels -->
+            <text class="edge-label" data-edge="start-assemble" x="332" y="62">user msg</text>
+            <text class="edge-label" data-edge="decide-tools" x="178" y="282">yes</text>
+            <text class="edge-label" data-edge="decide-done" x="430" y="282">no</text>
+            <text class="edge-label" data-edge="tools-llm" x="72" y="280" transform="rotate(-90 72 280)">tool results</text>
+
+            <!-- nodes -->
+            <g class="node" data-node="start" transform="translate(320, 28)">
+              <rect class="node-box start-end" x="-52" y="-18" width="104" height="36" rx="18" ry="18" />
+              <text class="node-title" y="1">Start</text>
+            </g>
+
+            <g class="node" data-node="assemble" transform="translate(320, 98)">
+              <rect class="node-box process" x="-90" y="-30" width="180" height="60" />
+              <text class="node-title" y="-6">组装 messages</text>
+              <text class="node-sub" y="14">system + history + user</text>
+            </g>
+
+            <g class="node" data-node="llm" transform="translate(320, 188)">
+              <rect class="node-box process" x="-90" y="-30" width="180" height="60" />
+              <text class="node-title" y="-6">调用模型</text>
+              <text class="node-sub" y="14">chat.completions + tools</text>
+            </g>
+
+            <!-- decision diamond -->
+            <g class="node" data-node="decide" transform="translate(320, 292)">
+              <polygon class="node-box" points="0,-44 64,0 0,44 -64,0" />
+              <text class="node-title" y="-4">tool_calls?</text>
+              <text class="node-sub" y="14">判定</text>
+            </g>
+
+            <g class="node" data-node="tools" transform="translate(170, 348)">
+              <rect class="node-box process" x="-78" y="-30" width="156" height="60" />
+              <text class="node-title" y="-6">执行工具</text>
+              <text class="node-sub" y="14">read / write / edit / bash</text>
+            </g>
+
+            <g class="node done-node" data-node="done" transform="translate(470, 368)">
+              <rect class="node-box start-end" x="-52" y="-18" width="104" height="36" rx="18" ry="18" />
+              <text class="node-title" y="1">Done ✓</text>
+            </g>
+          </svg>
         </div>
+
+        <div class="sm-caption" id="sm-caption">
+          <div class="step-tag" id="sm-step-tag">STEP 0 / 6</div>
+          <h4 id="sm-title">准备出发</h4>
+          <p id="sm-desc">状态机停在 Start。点「下一步」开始组装本轮对话上下文。</p>
+        </div>
+
         <div class="loop-controls">
           <button type="button" id="loop-prev">← 上一步</button>
           <button type="button" id="loop-next">下一步 →</button>
           <button type="button" id="loop-reset">重置</button>
+          <span class="step-count" id="sm-count">0 / 6</span>
         </div>
       </div>
 
@@ -832,15 +927,101 @@ npm run dev   <span class="c"># 交互 REPL；/reset 清历史，/exit 退出</s
 
   <script>
     (function () {
-      const steps = Array.from(document.querySelectorAll(".loop-step"));
+      /**
+       * Walk through the agent state machine for: "create hello.ts"
+       * Each step: active nodes, active edges, caption.
+       */
+      const walk = [
+        {
+          nodes: ["start"],
+          edges: [],
+          title: "Start",
+          desc: "用户输入任务。状态机进入，准备构建本轮 messages。",
+        },
+        {
+          nodes: ["assemble"],
+          edges: ["start-assemble"],
+          title: "组装 messages",
+          desc: "system prompt +（可选）历史 + 本轮 user。这是模型能看到的全部上下文。",
+        },
+        {
+          nodes: ["llm"],
+          edges: ["assemble-llm"],
+          title: "调用模型",
+          desc: "chat.completions.create，带上 tools 定义，tool_choice: \"auto\"。",
+        },
+        {
+          nodes: ["decide"],
+          edges: ["llm-decide"],
+          title: "判定：有 tool_calls？",
+          desc: "assistant 回复可能含文字和/或 tool_calls（例如 write hello.ts）。先 append assistant，再分支。",
+        },
+        {
+          nodes: ["tools"],
+          edges: ["decide-tools"],
+          title: "yes → 执行工具",
+          desc: "executeTool() 真正写文件 / 跑 bash。结果以 role: \"tool\" 写回 messages。",
+        },
+        {
+          nodes: ["llm"],
+          edges: ["tools-llm"],
+          title: "回环：带着结果再调模型",
+          desc: "工具结果进入上下文，再次 Call LLM。可能继续工具，也可能只输出总结。",
+        },
+        {
+          nodes: ["done"],
+          edges: ["llm-decide", "decide-done"],
+          title: "no → Done",
+          desc: "没有 tool_calls，结束循环，返回 history。CLI 打印最终文字。默认最多 30 轮。",
+        },
+      ];
+
+      const svg = document.getElementById("sm-svg");
+      const nodeEls = Array.from(svg.querySelectorAll(".node"));
+      const edgeEls = Array.from(svg.querySelectorAll(".edge"));
+      const edgeLabels = Array.from(svg.querySelectorAll(".edge-label"));
       let i = 0;
+
       function paint() {
-        steps.forEach((el, idx) => {
-          el.classList.toggle("active", idx === i);
+        const step = walk[i];
+        const nodeSet = new Set(step.nodes);
+        const edgeSet = new Set(step.edges);
+
+        // visited = all nodes appeared in previous steps
+        const visited = new Set();
+        for (let j = 0; j < i; j++) {
+          walk[j].nodes.forEach((n) => visited.add(n));
+        }
+
+        nodeEls.forEach((el) => {
+          const id = el.getAttribute("data-node");
+          el.classList.toggle("active", nodeSet.has(id));
+          el.classList.toggle("visited", visited.has(id) && !nodeSet.has(id));
         });
+
+        edgeEls.forEach((el) => {
+          const id = el.getAttribute("data-edge");
+          const on = edgeSet.has(id);
+          el.classList.toggle("active", on);
+          el.setAttribute("marker-end", on ? "url(#arrow-active)" : "url(#arrow)");
+        });
+
+        edgeLabels.forEach((el) => {
+          const id = el.getAttribute("data-edge");
+          el.classList.toggle("active", edgeSet.has(id));
+        });
+
+        document.getElementById("sm-step-tag").textContent =
+          "STEP " + i + " / " + (walk.length - 1);
+        document.getElementById("sm-title").textContent = step.title;
+        document.getElementById("sm-desc").innerHTML = step.desc
+          .replace(/`([^`]+)`/g, "<code>$1</code>");
+        document.getElementById("sm-count").textContent =
+          i + " / " + (walk.length - 1);
       }
+
       document.getElementById("loop-next").addEventListener("click", () => {
-        i = Math.min(steps.length - 1, i + 1);
+        i = Math.min(walk.length - 1, i + 1);
         paint();
       });
       document.getElementById("loop-prev").addEventListener("click", () => {
@@ -851,6 +1032,21 @@ npm run dev   <span class="c"># 交互 REPL；/reset 清历史，/exit 退出</s
         i = 0;
         paint();
       });
+
+      // click a node to jump to first step that highlights it
+      nodeEls.forEach((el) => {
+        el.style.cursor = "pointer";
+        el.addEventListener("click", () => {
+          const id = el.getAttribute("data-node");
+          const idx = walk.findIndex((s) => s.nodes.includes(id));
+          if (idx >= 0) {
+            i = idx;
+            paint();
+          }
+        });
+      });
+
+      paint();
     })();
   </script>
 </body>
