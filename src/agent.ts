@@ -14,6 +14,8 @@ export type AgentOptions = {
   maxTurns?: number;
   /** Default true — tokens / tool-arg fragments arrive as they generate. */
   stream?: boolean;
+  /** Load AGENTS.md / CLAUDE.md into the system prompt (default true). */
+  loadContextFiles?: boolean;
   /** Called for each assistant text chunk / tool event (for CLI logging). */
   onEvent?: (event: AgentEvent) => void;
 };
@@ -50,11 +52,16 @@ export async function runAgent(
     cwd,
     maxTurns = 30,
     stream = true,
+    loadContextFiles = true,
     onEvent,
   } = options;
 
+  const { prompt: systemPrompt } = buildSystemPrompt(cwd, {
+    disabled: !loadContextFiles,
+  });
+
   const messages: ChatCompletionMessageParam[] = [
-    { role: "system", content: buildSystemPrompt(cwd) },
+    { role: "system", content: systemPrompt },
     ...history.filter((m) => m.role !== "system"),
     { role: "user", content: userMessage },
   ];

@@ -1,0 +1,567 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AGENTS.md 原理 · mini-pi</title>
+  <meta name="description" content="讲解 AGENTS.md 如何被发现并注入 coding agent 的 system prompt" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #0c0e12;
+      --bg-elev: #13161d;
+      --bg-card: #171b24;
+      --border: #2a3140;
+      --text: #e8ecf4;
+      --muted: #8b95a8;
+      --faint: #5c667a;
+      --accent: #6ee7b7;
+      --cyan: #67e8f9;
+      --amber: #fbbf24;
+      --rose: #fb7185;
+      --violet: #a78bfa;
+      --blue: #60a5fa;
+      --radius: 12px;
+      --max: 820px;
+      --font: "IBM Plex Sans", system-ui, sans-serif;
+      --mono: "IBM Plex Mono", ui-monospace, monospace;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: var(--font);
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.65;
+      font-size: 16.5px;
+      -webkit-font-smoothing: antialiased;
+    }
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(251, 191, 36, 0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(251, 191, 36, 0.03) 1px, transparent 1px);
+      background-size: 48px 48px;
+      pointer-events: none;
+      z-index: 0;
+      mask-image: radial-gradient(ellipse 80% 50% at 50% 0%, black, transparent);
+    }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .wrap { position: relative; z-index: 1; max-width: var(--max); margin: 0 auto; padding: 0 1.25rem 5rem; }
+
+    nav {
+      position: sticky; top: 0; z-index: 50;
+      backdrop-filter: blur(12px);
+      background: rgba(12, 14, 18, 0.85);
+      border-bottom: 1px solid var(--border);
+      margin: 0 -1.25rem;
+      padding: 0.75rem 1.25rem;
+    }
+    nav .inner {
+      max-width: var(--max); margin: 0 auto;
+      display: flex; align-items: center; gap: 1rem;
+      flex-wrap: wrap; justify-content: space-between;
+    }
+    nav .brand {
+      font-family: var(--mono); font-weight: 600; font-size: 0.95rem; color: var(--text);
+    }
+    nav .brand span { color: var(--amber); }
+    nav .links { display: flex; gap: 0.25rem 1rem; flex-wrap: wrap; font-size: 0.85rem; }
+    nav .links a { color: var(--muted); }
+    nav .links a:hover { color: var(--text); text-decoration: none; }
+
+    header.hero { padding: 3rem 0 2rem; }
+    .badge {
+      display: inline-flex; gap: 0.4rem;
+      font-family: var(--mono); font-size: 0.72rem; font-weight: 500;
+      letter-spacing: 0.04em; text-transform: uppercase;
+      color: var(--amber); background: rgba(251, 191, 36, 0.1);
+      border: 1px solid rgba(251, 191, 36, 0.28);
+      padding: 0.3rem 0.65rem; border-radius: 999px; margin-bottom: 1.15rem;
+    }
+    h1 {
+      font-size: clamp(1.75rem, 5vw, 2.4rem);
+      font-weight: 700; letter-spacing: -0.03em; line-height: 1.2; margin-bottom: 1rem;
+    }
+    h1 em { font-style: normal; color: var(--amber); }
+    .lead { font-size: 1.08rem; color: var(--muted); max-width: 40em; margin-bottom: 1rem; }
+
+    section { margin-top: 3rem; scroll-margin-top: 4rem; }
+    h2 {
+      font-size: 1.3rem; font-weight: 700; letter-spacing: -0.02em;
+      margin-bottom: 0.85rem; display: flex; align-items: baseline; gap: 0.6rem;
+    }
+    h2 .num { font-family: var(--mono); font-size: 0.8rem; color: var(--amber); font-weight: 600; }
+    h3 { font-size: 1.05rem; font-weight: 600; margin: 1.4rem 0 0.55rem; }
+    p { margin-bottom: 0.85rem; color: var(--muted); }
+    p strong, li strong { color: var(--text); font-weight: 600; }
+
+    ul.plain { list-style: none; margin: 0.75rem 0 1rem; }
+    ul.plain li {
+      position: relative; padding-left: 1.2rem; margin-bottom: 0.4rem; color: var(--muted);
+    }
+    ul.plain li::before {
+      content: "→"; position: absolute; left: 0; color: var(--amber);
+      font-family: var(--mono); font-size: 0.85rem;
+    }
+
+    .grid-2 {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 0.85rem; margin: 1rem 0;
+    }
+    @media (max-width: 640px) { .grid-2 { grid-template-columns: 1fr; } }
+    .card {
+      background: var(--bg-card); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 1.1rem 1.15rem;
+    }
+    .card h4 {
+      font-family: var(--mono); font-size: 0.88rem; font-weight: 600;
+      margin-bottom: 0.4rem; color: var(--text);
+    }
+    .card p { font-size: 0.9rem; margin-bottom: 0; }
+
+    .callout {
+      background: linear-gradient(135deg, rgba(251, 191, 36, 0.08), rgba(110, 231, 183, 0.05));
+      border: 1px solid rgba(251, 191, 36, 0.25);
+      border-radius: var(--radius); padding: 1rem 1.15rem; margin: 1.15rem 0;
+      font-size: 0.95rem; color: var(--muted);
+    }
+    .callout strong { color: var(--amber); }
+
+    pre, code { font-family: var(--mono); }
+    pre {
+      background: #0a0c10; border: 1px solid var(--border); border-radius: var(--radius);
+      padding: 1rem 1.1rem; overflow-x: auto; font-size: 0.78rem; line-height: 1.55;
+      margin: 0.85rem 0 1.1rem; color: #c8d0e0;
+    }
+    pre .c { color: #5c667a; }
+    pre .k { color: #c4b5fd; }
+    pre .s { color: #6ee7b7; }
+    pre .f { color: #67e8f9; }
+    pre .n { color: #fbbf24; }
+    code.inline {
+      font-size: 0.86em; background: var(--bg-card); border: 1px solid var(--border);
+      padding: 0.1em 0.35em; border-radius: 4px; color: var(--amber);
+    }
+
+    .tree {
+      font-family: var(--mono); font-size: 0.82rem; line-height: 1.75;
+      color: var(--muted); background: var(--bg-card); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 1rem 1.2rem; margin: 1rem 0;
+      white-space: pre; overflow-x: auto;
+    }
+    .tree .dir { color: var(--amber); }
+    .tree .file { color: var(--text); }
+    .tree .hit { color: var(--accent); font-weight: 600; }
+    .tree .note { color: var(--faint); }
+
+    /* walk visual */
+    .walk {
+      background: var(--bg-elev); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 1.15rem; margin: 1.15rem 0;
+    }
+    .walk-row {
+      display: grid; grid-template-columns: 1.5rem 1fr auto; gap: 0.6rem;
+      align-items: center; padding: 0.45rem 0.5rem; border-radius: 8px;
+      font-family: var(--mono); font-size: 0.82rem; color: var(--muted);
+      margin-bottom: 0.35rem; border: 1px solid transparent;
+      transition: background 0.15s, border-color 0.15s, color 0.15s;
+    }
+    .walk-row .mark { color: var(--faint); text-align: center; }
+    .walk-row.active {
+      background: rgba(251, 191, 36, 0.1);
+      border-color: rgba(251, 191, 36, 0.35);
+      color: var(--text);
+    }
+    .walk-row.active .mark { color: var(--amber); }
+    .walk-row.found {
+      background: rgba(110, 231, 183, 0.08);
+      border-color: rgba(110, 231, 183, 0.3);
+    }
+    .walk-row.found .mark { color: var(--accent); }
+    .walk-row .tag {
+      font-size: 0.7rem; padding: 0.15rem 0.45rem; border-radius: 999px;
+      border: 1px solid var(--border); color: var(--faint);
+    }
+    .walk-row.found .tag {
+      border-color: rgba(110, 231, 183, 0.4); color: var(--accent);
+    }
+    .walk-meta {
+      font-family: var(--mono); font-size: 0.75rem; color: var(--faint);
+      margin-bottom: 0.75rem;
+    }
+    .walk-meta strong { color: var(--amber); font-weight: 500; }
+    .demo-controls { display: flex; gap: 0.5rem; margin-top: 0.85rem; flex-wrap: wrap; }
+    .demo-controls button {
+      font-family: var(--mono); font-size: 0.78rem; padding: 0.4rem 0.75rem;
+      border-radius: 6px; border: 1px solid var(--border); background: var(--bg-card);
+      color: var(--muted); cursor: pointer;
+    }
+    .demo-controls button:hover { color: var(--text); border-color: var(--amber); }
+    .demo-controls button.primary {
+      background: rgba(251, 191, 36, 0.12); color: var(--amber);
+      border-color: rgba(251, 191, 36, 0.4);
+    }
+
+    /* prompt sandwich */
+    .sandwich {
+      border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden;
+      margin: 1rem 0; font-family: var(--mono); font-size: 0.8rem;
+    }
+    .sandwich .layer {
+      padding: 0.85rem 1rem; border-bottom: 1px solid var(--border);
+    }
+    .sandwich .layer:last-child { border-bottom: none; }
+    .sandwich .layer .lbl {
+      font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em;
+      margin-bottom: 0.35rem; font-weight: 600;
+    }
+    .sandwich .base { background: #12161f; }
+    .sandwich .base .lbl { color: var(--cyan); }
+    .sandwich .ctx { background: #1a1812; }
+    .sandwich .ctx .lbl { color: var(--amber); }
+    .sandwich .hist { background: #121a16; }
+    .sandwich .hist .lbl { color: var(--accent); }
+    .sandwich .user { background: #121822; }
+    .sandwich .user .lbl { color: var(--blue); }
+    .sandwich .body { color: var(--muted); white-space: pre-wrap; line-height: 1.5; }
+    .sandwich .body em { font-style: normal; color: var(--text); }
+
+    table {
+      width: 100%; border-collapse: collapse; font-size: 0.9rem; margin: 1rem 0;
+    }
+    th, td {
+      text-align: left; padding: 0.6rem 0.7rem; border-bottom: 1px solid var(--border);
+    }
+    th {
+      font-family: var(--mono); font-size: 0.72rem; color: var(--faint);
+      text-transform: uppercase; letter-spacing: 0.04em; font-weight: 500;
+    }
+    td { color: var(--muted); }
+    td:first-child { font-family: var(--mono); color: var(--text); font-size: 0.84rem; }
+
+    footer {
+      margin-top: 4rem; padding-top: 1.5rem; border-top: 1px solid var(--border);
+      font-size: 0.85rem; color: var(--faint);
+      display: flex; flex-wrap: wrap; gap: 0.75rem 1.5rem; justify-content: space-between;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <nav>
+      <div class="inner">
+        <a class="brand" href="./index.html">mini-<span>pi</span> · agents.md</a>
+        <div class="links">
+          <a href="./index.html">总览</a>
+          <a href="./streaming.html">Streaming</a>
+          <a href="./sessions.html">Sessions</a>
+          <a href="#why">为什么</a>
+          <a href="#discover">发现</a>
+          <a href="#inject">注入</a>
+          <a href="#demo">演示</a>
+          <a href="#write">怎么写</a>
+          <a href="https://github.com/giggling-ginger/mini-pi" target="_blank" rel="noopener">GitHub ↗</a>
+        </div>
+      </div>
+    </nav>
+
+    <header class="hero">
+      <div class="badge">AGENTS.md · Project instructions</div>
+      <h1>项目规则怎么进<br />模型的 <em>system prompt</em></h1>
+      <p class="lead">
+        mini-pi 的 system prompt 故意很短。项目约定（包管理器、测试命令、目录结构……）
+        不写死在代码里，而是读仓库里的 <code class="inline">AGENTS.md</code>，拼到 system 后面。
+      </p>
+      <p class="lead" style="font-size:0.95rem">
+        源码：<code class="inline">src/context-files.ts</code> · <code class="inline">src/system.ts</code>
+      </p>
+    </header>
+
+    <section id="why">
+      <h2><span class="num">01</span> 为什么需要它</h2>
+      <div class="grid-2">
+        <div class="card">
+          <h4>没有 AGENTS.md</h4>
+          <p>
+            模型只知道「你是 coding agent + 四个工具」。
+            不知道你们用 pnpm 还是 npm，测试怎么跑，哪些目录别乱动。
+          </p>
+        </div>
+        <div class="card">
+          <h4>有 AGENTS.md</h4>
+          <p>
+            启动时读进 system prompt。每一轮 API 调用都带着这些规则
+            （system 不进 session 文件，但每次会重新加载最新磁盘内容）。
+          </p>
+        </div>
+      </div>
+      <div class="callout">
+        <strong>和 Session 的分工：</strong>
+        Session 记「我们聊过什么」；AGENTS.md 记「这个仓库的规矩」。
+        前者是对话历史，后者是项目说明书。
+      </div>
+    </section>
+
+    <section id="discover">
+      <h2><span class="num">02</span> 怎么「发现」文件</h2>
+      <p>从 <code class="inline">cwd</code> 开始，一路走到 <strong>git 根目录</strong>（有 <code class="inline">.git</code> 的那层），沿途找：</p>
+      <ul class="plain">
+        <li><code class="inline">AGENTS.md</code>（优先）</li>
+        <li>否则 <code class="inline">CLAUDE.md</code></li>
+        <li>否则 <code class="inline">AGENT.md</code></li>
+      </ul>
+      <p>每个目录只取<strong>一个</strong>；更靠近 cwd 的文件排在后面（更具体）。</p>
+
+      <pre class="tree"><span class="dir">repo/</span>                          <span class="note"># git root = 停止向上</span>
+├── <span class="hit">AGENTS.md</span>                  <span class="note"># ① 先收集（全局约定）</span>
+├── package.json
+└── <span class="dir">packages/app/</span>              <span class="note"># 你在这里跑 mini-pi</span>
+    ├── <span class="hit">AGENTS.md</span>              <span class="note"># ② 后收集（包级约定）</span>
+    └── src/...</pre>
+
+      <div class="callout">
+        <strong>预算：</strong>全部 context 文件合计最多约 32KB 字符，超出截断并标注
+        <code class="inline">[truncated]</code>，避免单个巨型 markdown 撑爆上下文。
+      </div>
+    </section>
+
+    <section id="inject">
+      <h2><span class="num">03</span> 怎么塞进 prompt</h2>
+      <p>每一轮发给模型的消息大致是这样一块「三明治」：</p>
+      <div class="sandwich">
+        <div class="layer base">
+          <div class="lbl">system · base（代码写死，很短）</div>
+          <div class="body">You are a coding agent… four tools: read, write, edit, bash…</div>
+        </div>
+        <div class="layer ctx">
+          <div class="lbl">system · project instructions（AGENTS.md 拼上）</div>
+          <div class="body"># Project instructions
+### AGENTS.md
+<em>Use pnpm. Run tests with vitest…</em>
+### packages/app/AGENTS.md
+<em>Prefer colocated tests…</em></div>
+        </div>
+        <div class="layer hist">
+          <div class="lbl">history（来自 session，不含 system）</div>
+          <div class="body">user / assistant / tool / …</div>
+        </div>
+        <div class="layer user">
+          <div class="lbl">本轮 user</div>
+          <div class="body">add a failing test for parseArgs</div>
+        </div>
+      </div>
+      <pre><span class="c">// system.ts（简化）</span>
+<span class="k">const</span> files = <span class="f">loadContextFiles</span>({ cwd })
+<span class="k">const</span> prompt =
+  <span class="f">buildBaseSystemPrompt</span>(cwd) +
+  <span class="f">formatContextBlock</span>(files)   <span class="c">// 没有文件则是空字符串</span>
+
+messages = [
+  { role: <span class="s">"system"</span>, content: prompt },
+  ...history,
+  { role: <span class="s">"user"</span>, content: userMessage },
+]</pre>
+      <p>
+        因此：你改了 AGENTS.md 再开一轮（或新 session），模型立刻读到新规则——
+        <strong>不必清 session</strong>（system 每次重建）。
+      </p>
+    </section>
+
+    <section id="demo">
+      <h2><span class="num">04</span> 交互演示：向上走</h2>
+      <p>假设 cwd 在 <code class="inline">packages/app</code>，看发现顺序：</p>
+      <div class="walk">
+        <div class="walk-meta">
+          step: <strong id="walk-step">0</strong> ·
+          found: <strong id="walk-found">—</strong>
+        </div>
+        <div id="walk-rows"></div>
+        <div class="demo-controls">
+          <button type="button" class="primary" id="walk-next">下一步 →</button>
+          <button type="button" id="walk-reset">重置</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="write">
+      <h2><span class="num">05</span> AGENTS.md 写什么好</h2>
+      <div class="grid-2">
+        <div class="card">
+          <h4>适合写</h4>
+          <p>包管理器、测试/构建命令、目录约定、禁止事项、PR/commit 风格、和本仓库相关的工具偏好。</p>
+        </div>
+        <div class="card">
+          <h4>别塞爆</h4>
+          <p>整本设计文档、巨型 API 列表、会过期的临时 TODO——会占上下文且干扰模型。保持短、可执行。</p>
+        </div>
+      </div>
+      <pre><span class="c"># AGENTS.md 示例</span>
+
+## Stack
+- Node 20 + TypeScript ESM
+- Tests: <span class="s">npx tsx src/*.test.ts</span>
+
+## Rules
+- Do not commit <span class="s">.env</span> or <span class="s">.mini-pi/</span>
+- Prefer small PRs; match existing code style
+
+## Don't
+- Don't add heavy frameworks without asking</pre>
+    </section>
+
+    <section id="cli">
+      <h2><span class="num">06</span> CLI / REPL</h2>
+      <table>
+        <thead>
+          <tr><th>命令</th><th>作用</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>（默认）</td>
+            <td>自动加载 AGENTS.md 等，启动时打印路径</td>
+          </tr>
+          <tr>
+            <td><code class="inline">--no-context-files</code> / <code class="inline">-nc</code></td>
+            <td>本 run 不加载（对照实验很有用）</td>
+          </tr>
+          <tr>
+            <td>REPL <code class="inline">/context</code></td>
+            <td>列出当前加载了哪些文件和字符数</td>
+          </tr>
+        </tbody>
+      </table>
+      <pre>npm run dev -- -p <span class="s">"跑一下 typecheck"</span>
+<span class="c"># stderr 可能看到: context 1 file(s): AGENTS.md</span>
+
+npm run dev -- -nc -p <span class="s">"同一任务但不读 AGENTS.md"</span></pre>
+    </section>
+
+    <section id="pitfalls">
+      <h2><span class="num">07</span> 常见误解</h2>
+      <table>
+        <thead>
+          <tr><th>误解</th><th>实际</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>AGENTS.md 会存进 session JSONL</td>
+            <td>不存。system 每次现拼，改文件立即生效</td>
+          </tr>
+          <tr>
+            <td>和 skills / MCP 一样</td>
+            <td>只是文本说明书，不注册新工具</td>
+          </tr>
+          <tr>
+            <td>模型一定会 100% 遵守</td>
+            <td>仍是 soft instructions；写清楚 + 简短更有效</td>
+          </tr>
+          <tr>
+            <td>子目录 CLAUDE.md 和 AGENTS.md 会合并</td>
+            <td>同目录只取优先级最高的一个名字</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="callout">
+        <strong>一句话：</strong>AGENTS.md = 可版本管理的项目 system 附录。
+        Harness 负责找到它并拼进 prompt；写得好不好，决定 agent 像不像「你们队的人」。
+      </div>
+    </section>
+
+    <footer>
+      <span>
+        <a href="./index.html">← 总览</a> ·
+        <a href="./streaming.html">Streaming</a> ·
+        <a href="./sessions.html">Sessions</a>
+      </span>
+      <span>mini-pi · MIT · 仅供学习</span>
+    </footer>
+  </div>
+
+  <script>
+    (function () {
+      const steps = [
+        {
+          rows: [
+            { path: "packages/app/", mark: "·", tag: "cwd", cls: "active" },
+            { path: "packages/", mark: "·", tag: "", cls: "" },
+            { path: "repo/  (.git)", mark: "·", tag: "stop", cls: "" },
+          ],
+          found: "—",
+        },
+        {
+          rows: [
+            { path: "packages/app/AGENTS.md", mark: "✓", tag: "found", cls: "found" },
+            { path: "packages/", mark: "·", tag: "", cls: "" },
+            { path: "repo/  (.git)", mark: "·", tag: "stop", cls: "" },
+          ],
+          found: "packages/app/AGENTS.md",
+        },
+        {
+          rows: [
+            { path: "packages/app/AGENTS.md", mark: "✓", tag: "kept", cls: "found" },
+            { path: "packages/  (no AGENTS.md)", mark: "·", tag: "skip", cls: "active" },
+            { path: "repo/  (.git)", mark: "·", tag: "stop", cls: "" },
+          ],
+          found: "packages/app/AGENTS.md",
+        },
+        {
+          rows: [
+            { path: "packages/app/AGENTS.md", mark: "✓", tag: "near", cls: "found" },
+            { path: "packages/", mark: "·", tag: "skip", cls: "" },
+            { path: "repo/AGENTS.md", mark: "✓", tag: "outer", cls: "found" },
+          ],
+          found: "repo/AGENTS.md → packages/app/AGENTS.md",
+        },
+        {
+          rows: [
+            { path: "inject order: outer first, near last", mark: "→", tag: "system", cls: "active" },
+            { path: "1) repo/AGENTS.md  (global)", mark: "1", tag: "", cls: "found" },
+            { path: "2) packages/app/AGENTS.md  (specific)", mark: "2", tag: "", cls: "found" },
+          ],
+          found: "2 files → formatContextBlock → system prompt",
+        },
+      ];
+
+      const rowsEl = document.getElementById("walk-rows");
+      const stepEl = document.getElementById("walk-step");
+      const foundEl = document.getElementById("walk-found");
+      let i = 0;
+
+      function paint() {
+        const s = steps[i];
+        rowsEl.innerHTML = s.rows
+          .map(
+            (r) =>
+              `<div class="walk-row ${r.cls}">` +
+              `<span class="mark">${r.mark}</span>` +
+              `<span>${escapeHtml(r.path)}</span>` +
+              (r.tag ? `<span class="tag">${escapeHtml(r.tag)}</span>` : "<span></span>") +
+              `</div>`,
+          )
+          .join("");
+        stepEl.textContent = String(i) + " / " + (steps.length - 1);
+        foundEl.textContent = s.found;
+      }
+
+      function escapeHtml(s) {
+        return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      }
+
+      document.getElementById("walk-next").addEventListener("click", () => {
+        i = Math.min(steps.length - 1, i + 1);
+        paint();
+      });
+      document.getElementById("walk-reset").addEventListener("click", () => {
+        i = 0;
+        paint();
+      });
+      paint();
+    })();
+  </script>
+</body>
+</html>

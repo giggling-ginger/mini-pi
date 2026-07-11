@@ -17,6 +17,7 @@ import type { ChatCompletionMessageParam } from "openai/resources/chat/completio
 import { runAgent, type AgentEvent } from "./agent.js";
 import { loadDotEnv } from "./env.js";
 import { createClient, loadLlmConfig } from "./llm.js";
+import { loadContextFiles } from "./context-files.js";
 import {
   Session,
   defaultSessionDir,
@@ -48,10 +49,15 @@ Sessions (saved under .mini-pi/sessions/ as JSONL):
   --no-session           Do not load or save a session (ephemeral)
   --list-sessions        Print sessions and exit
 
+Project instructions:
+  --no-context-files     Do not load AGENTS.md / CLAUDE.md into system prompt
+  -nc                    Short for --no-context-files
+
 REPL commands:
   /exit /quit    Quit
   /reset         New empty session file (keeps old file on disk)
   /session       Show current session path + id
+  /context       Show loaded AGENTS.md (etc.) paths
   /help          This help
 
 Examples:
@@ -60,6 +66,7 @@ Examples:
   mini-pi --resume
   mini-pi --session 2026-07-11
   mini-pi --no-session -p "ephemeral task"
+  mini-pi -nc -p "ignore AGENTS.md this run"
 `.trim();
 
 type Args = {
@@ -74,6 +81,7 @@ type Args = {
   sessionDir?: string;
   noSession: boolean;
   listSessions: boolean;
+  noContextFiles: boolean;
 };
 
 function parseArgs(argv: string[]): Args {
@@ -86,6 +94,7 @@ function parseArgs(argv: string[]): Args {
   let sessionDir: string | undefined;
   let noSession = false;
   let listSessionsFlag = false;
+  let noContextFiles = false;
   const rest: string[] = [];
 
   for (let i = 0; i < argv.length; i++) {
@@ -101,6 +110,7 @@ function parseArgs(argv: string[]): Args {
         resume: false,
         noSession: false,
         listSessions: false,
+        noContextFiles: false,
       };
     }
     if (a === "-p" || a === "--print") {
@@ -115,9 +125,8 @@ function parseArgs(argv: string[]): Args {
       cwd = argv[++i] ?? cwd;
       continue;
     }
-    // keep -c as alias for --cwd? was old behavior; document --continue separately
+    // Pi-style: -c means continue. cwd uses --cwd only.
     if (a === "-c") {
-      // Prefer Pi-style: -c means continue. cwd uses --cwd only.
       continueSession = true;
       continue;
     }
@@ -145,6 +154,10 @@ function parseArgs(argv: string[]): Args {
       listSessionsFlag = true;
       continue;
     }
+    if (a === "--no-context-files" || a === "-nc") {
+      noContextFiles = true;
+      continue;
+    }
     if (a.startsWith("-")) {
       console.error(`Unknown option: ${a}`);
       process.exit(1);
@@ -164,6 +177,7 @@ function parseArgs(argv: string[]): Args {
     sessionDir,
     noSession,
     listSessions: listSessionsFlag,
+    noContextFiles,
   };
 }
 
@@ -336,6 +350,11 @@ async function main() {
   const client = createClient(config);
   const cwd = args.cwd;
 
+  const contextFiles = loadContextFiles({
+    cwd,
+    disabled: args.noContextFiles,
+  });
+
   let session = await openSession(args, {
     model: config.model,
     provider: config.provider,
@@ -354,12 +373,21 @@ async function main() {
       console.error(`  resumed ${session.history.length} messages · ${session.title}`);
     }
   }
+  if (args.noContextFiles) {
+    console.error(`  context-files off`);
+  } else if (contextFiles.length > 0) {
+    const names = contextFiles.map((f) => f.displayPath).join(", ");
+    console.error(`  context ${contextFiles.length} file(s): ${names}`);
+  } else {
+    console.error(`  context none (no AGENTS.md / CLAUDE.md found)`);
+  }
 
   const agentOpts = {
     client,
     model: config.model,
     cwd,
     stream: args.stream,
+    loadContextFiles: !args.noContextFiles,
     onEvent: createEventPrinter(),
   };
 
@@ -386,7 +414,7 @@ async function main() {
 
   console.log(
     "Type a task (empty or /exit to quit).\n" +
-      "Sessions auto-save to .mini-pi/sessions/  ·  /session  /reset  /help\n",
+      "Sessions · AGENTS.md auto-loaded  ·  /session  /context  /reset  /help\n",
   );
 
   while (true) {
@@ -425,6 +453,19 @@ async function main() {
         console.log(`file:  ${session.path}`);
         console.log(`title: ${session.title}`);
         console.log(`msgs:  ${history.length}`);
+      }
+      continue;
+    }
+
+    if (line === "/context") {
+      if (args.noContextFiles) {
+        console.log("context-files: off (-nc / --no-context-files)");
+      } else if (contextFiles.length === 0) {
+        console.log("No AGENTS.md / CLAUDE.md found from cwd up to git root.");
+      } else {
+        for (const f of contextFiles) {
+          console.log(`${f.displayPath}  (${f.chars} chars)`);
+        }
       }
       continue;
     }

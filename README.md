@@ -11,6 +11,7 @@ A **minimal Pi-inspired coding agent** for learning how agent harnesses work.
 - 总览：[docs/index.html](./docs/index.html) · [Pages](https://giggling-ginger.github.io/mini-pi/)
 - **Streaming 原理**：[docs/streaming.html](./docs/streaming.html) · [Pages](https://giggling-ginger.github.io/mini-pi/streaming.html)
 - **Sessions 原理**：[docs/sessions.html](./docs/sessions.html) · [Pages](https://giggling-ginger.github.io/mini-pi/sessions.html)
+- **AGENTS.md 原理**：[docs/agents.html](./docs/agents.html) · [Pages](https://giggling-ginger.github.io/mini-pi/agents.html)
 
 Philosophy (inspired by [Pi](https://pi.dev)):
 
@@ -144,12 +145,29 @@ npm run dev -- --no-session -p "ephemeral"
 
 Each file starts with a `meta` line, then one JSON object per message (`user` / `assistant` / `tool`). Reload reconstructs the same `messages[]` the agent loop uses.
 
+How it works (JSONL growth demo + continue flow): **[docs/sessions.html](./docs/sessions.html)**.
+
 | REPL     | Action                                      |
 |----------|---------------------------------------------|
 | `/session` | Show id + path                            |
+| `/context` | Show loaded AGENTS.md paths               |
 | `/reset`   | Start a **new** session file (old kept)   |
 | `/exit`    | Quit                                      |
 | `/help`    | Help                                      |
+
+## AGENTS.md
+
+Project instructions are loaded from `AGENTS.md` (or `CLAUDE.md` / `AGENT.md`) from `cwd` up to the git root, and **appended to the system prompt** each turn.
+
+```bash
+# default: load context files
+npm run dev -- -p "run typecheck the way this repo likes"
+
+# skip for one run
+npm run dev -- -nc -p "same task without AGENTS.md"
+```
+
+How discovery + injection works: **[docs/agents.html](./docs/agents.html)**.
 
 ## Streaming
 
@@ -172,10 +190,9 @@ How it works (wire diagram + interactive demo): **[docs/streaming.html](./docs/s
 
 ## Next steps (if you extend it)
 
-1. **AGENTS.md** — inject project instructions into system prompt
-2. **Extensions** — load extra tools from `~/.mini-pi/extensions/`
-3. **Context compaction** — summarize old turns when near context limit
-4. **Session branch/tree** — fork a session like Pi
+1. **Extensions** — load extra tools from `~/.mini-pi/extensions/`
+2. **Context compaction** — summarize old turns when near context limit
+3. **Session branch/tree** — fork a session like Pi
 
 ## License
 
