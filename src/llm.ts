@@ -70,13 +70,18 @@ function ollamaConfig(): LlmConfig {
 function openrouterConfig(): LlmConfig {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) {
-    throw new Error("PROVIDER=openrouter requires OPENROUTER_API_KEY");
+    throw new Error(
+      "PROVIDER=openrouter requires OPENROUTER_API_KEY\n" +
+        "  1. Create a free key: https://openrouter.ai/keys\n" +
+        "  2. Put it in mini-pi/.env  (see .env.example)",
+    );
   }
   return {
     provider: "openrouter",
     apiKey,
     baseURL: process.env.OPENAI_BASE_URL || "https://openrouter.ai/api/v1",
-    model: process.env.MODEL || "openai/gpt-4o-mini",
+    // Free router auto-picks free models that support tools when needed
+    model: process.env.MODEL || "openrouter/free",
   };
 }
 
@@ -120,9 +125,14 @@ function missingKeyHelp(): string {
     "       export MODEL=llama3.2   # or qwen2.5-coder, etc.",
     "       ollama pull llama3.2",
     "",
-    "  2) OpenRouter   — https://openrouter.ai/keys",
-    "       export OPENROUTER_API_KEY=sk-or-...",
-    "       export MODEL=openai/gpt-4o-mini",
+    "  2) OpenRouter free — https://openrouter.ai/keys",
+    "       Put in .env:",
+    "         OPENROUTER_API_KEY=sk-or-...",
+    "         MODEL=openrouter/free",
+    "       Or coding-focused free models:",
+    "         MODEL=qwen/qwen3-coder:free",
+    "         MODEL=poolside/laguna-xs-2.1:free",
+    "         MODEL=openai/gpt-oss-120b:free",
     "",
     "  3) OpenAI API   — https://platform.openai.com/api-keys",
     "       (separate from ChatGPT/Codex subscription; pay-per-token)",

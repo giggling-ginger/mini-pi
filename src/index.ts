@@ -11,7 +11,10 @@ import readline from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
 import { runAgent, type AgentEvent } from "./agent.js";
+import { loadDotEnv } from "./env.js";
 import { createClient, loadLlmConfig } from "./llm.js";
+
+loadDotEnv();
 
 const HELP = `
 mini-pi — minimal coding agent (read / write / edit / bash)

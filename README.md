@@ -31,24 +31,40 @@ You need an **OpenAI-compatible HTTP API**. Chat subscriptions alone are not eno
 | **Ollama** (local) | Yes | Free — best for learning the harness |
 | **OpenRouter / OpenAI API / xAI API** | Yes | Set the matching env var |
 
-### Recommended if you have no paid API: Ollama
+### Recommended: OpenRouter free models
+
+1. Create a free key at [openrouter.ai/keys](https://openrouter.ai/keys)
+2. Configure:
 
 ```bash
-# install ollama, then:
-ollama pull llama3.2   # or qwen2.5-coder, etc.
-export PROVIDER=ollama
-export MODEL=llama3.2
+cp .env.example .env
+# edit .env — paste OPENROUTER_API_KEY=sk-or-v1-...
+```
 
+Default model is `openrouter/free` (auto-routes among free models that support tools).
+
+```bash
 npm run dev -- -p "Create a file hello.ts that prints hello"
 npm run dev   # interactive
 ```
 
+Pin a free coding model if you want:
+
+```bash
+# in .env
+MODEL=qwen/qwen3-coder:free
+# MODEL=poolside/laguna-xs-2.1:free
+# MODEL=openai/gpt-oss-120b:free
+```
+
+Free tier has rate limits; if a model is busy, try another `:free` id from [openrouter.ai/models](https://openrouter.ai/models?q=free).
+
 ### Other providers
 
 ```bash
-# OpenRouter
-export OPENROUTER_API_KEY=sk-or-...
-export MODEL=openai/gpt-4o-mini
+# Ollama (local, free)
+export PROVIDER=ollama
+export MODEL=llama3.2
 
 # OpenAI platform API (≠ ChatGPT subscription billing)
 export OPENAI_API_KEY=sk-...
