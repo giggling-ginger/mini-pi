@@ -1,10 +1,10 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>mini-pi 讲解 · 最小 Coding Agent 是怎么工作的</title>
-  <meta name="description" content="Learning project: 用一篇网页讲清楚 mini-pi 的 agent loop、四个工具与源码结构。灵感来自 Pi，非官方。" />
+  <title>mini-pi walkthrough · How a minimal coding agent works</title>
+  <meta name="description" content="Learning project: a single page that explains mini-pi's agent loop, four tools, and source layout. Inspired by Pi — not official." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
@@ -561,108 +561,108 @@
   <div class="wrap">
     <nav>
       <div class="inner">
-        <a class="brand" href="#">mini-<span>pi</span> 讲解</a>
+        <a class="brand" href="#">mini-<span>pi</span> walkthrough</a>
         <div class="links">
-          <a href="#why">理念</a>
-          <a href="#arch">架构</a>
-          <a href="#loop">循环</a>
-          <a href="#tools">工具</a>
-          <a href="#code">源码</a>
+          <a href="#why">Why</a>
+          <a href="#arch">Architecture</a>
+          <a href="#loop">Loop</a>
+          <a href="#tools">Tools</a>
+          <a href="#code">Source</a>
           <a href="./streaming.html">Streaming</a>
           <a href="./sessions.html">Sessions</a>
           <a href="./agents.html">AGENTS.md</a>
           <a href="./compact.html">Compaction</a>
-          <a href="#next">扩展</a>
+          <a href="#next">Next</a>
           <a href="https://github.com/giggling-ginger/mini-pi" target="_blank" rel="noopener">GitHub ↗</a>
-          <a href="./en/index.html">EN</a>
-          <a href="./index.html">中文</a>
+          <a href="../index.html">中文</a>
+          <a href="./index.html">EN</a>
         </div>
       </div>
     </nav>
 
     <header class="hero">
       <div class="badge">Learning Project · Not Production</div>
-      <h1>最小 Coding Agent<br />是怎么 <em>跑起来</em> 的</h1>
+      <h1>How a minimal coding agent<br />actually <em>runs</em></h1>
       <p class="lead">
-        <strong style="color:var(--text)">mini-pi</strong> 是一个学习用的终端 coding agent：
-        极简 system prompt + 四个工具 + 一个 tool-calling 循环。
-        灵感来自 <a href="https://pi.dev" target="_blank" rel="noopener">Pi</a>，
-        <strong style="color:var(--text)">非官方、非附属</strong>。
+        <strong style="color:var(--text)">mini-pi</strong> is a learning-oriented terminal coding agent:
+        a minimal system prompt + four tools + one tool-calling loop.
+        Inspired by <a href="https://pi.dev" target="_blank" rel="noopener">Pi</a>,
+        <strong style="color:var(--text)">unofficial and unaffiliated</strong>.
       </p>
       <div class="cta-row">
-        <a class="btn primary" href="https://github.com/giggling-ginger/mini-pi">看源码</a>
-        <a class="btn" href="#loop">看 Agent Loop →</a>
+        <a class="btn primary" href="https://github.com/giggling-ginger/mini-pi">View source</a>
+        <a class="btn" href="#loop">See the agent loop →</a>
       </div>
       <p class="disclaimer">
-        本页解释仓库里的真实代码结构。Agent 能执行 shell、改文件——只在可信工作区使用。
+        This page explains the real code structure in the repo. The agent can run shell commands and edit files — use it only in trusted workspaces.
       </p>
     </header>
 
     <!-- 1 philosophy -->
     <section id="why">
-      <h2><span class="num">01</span> 为什么做这么「少」</h2>
+      <h2><span class="num">01</span> Why so little</h2>
       <p>
-        市面上的 coding agent 功能很多：plan mode、subagent、MCP、权限弹窗、花哨 TUI……
-        Pi 的有趣之处在于反其道而行——<strong>内核刻意做小</strong>，复杂能力用扩展补。
+        Most coding agents ship a lot: plan mode, subagents, MCP, permission prompts, fancy TUIs…
+        Pi is interesting because it goes the other way — <strong>the core stays small on purpose</strong>, and complexity lives in extensions.
       </p>
       <p>
-        mini-pi 更进一步：只保留「能改代码」的最小闭环，方便你看清
-        <strong>所有 agent harness 共享的骨架</strong>：
+        mini-pi goes further: it keeps only the minimal closed loop that can change code, so you can see clearly
+        <strong>the skeleton every agent harness shares</strong>:
       </p>
       <div class="callout">
         <strong>Model + Prompt + Tools + Loop = Coding Agent</strong><br />
-        没有魔法。模型决定下一步；本地代码执行工具；结果塞回对话；重复直到模型闭嘴。
+        No magic. The model chooses the next step; local code runs tools; results go back into the conversation; repeat until the model stops.
       </div>
       <ul class="plain">
-        <li><strong>短 prompt</strong> —— 少占上下文，少绑死行为</li>
-        <li><strong>四个工具</strong> —— 读写改文件 + 跑命令，够改代码了</li>
-        <li><strong>信任模型</strong> —— 不堆业务规则，把流程交给 LLM</li>
+        <li><strong>Short prompt</strong> — less context burned, fewer hard-coded behaviors</li>
+        <li><strong>Four tools</strong> — read, write, edit files + run commands; enough to change code</li>
+        <li><strong>Trust the model</strong> — no pile of business rules; leave the flow to the LLM</li>
       </ul>
     </section>
 
     <!-- 2 arch -->
     <section id="arch">
-      <h2><span class="num">02</span> 源码地图</h2>
-      <p>整个项目几乎只有这些文件（外加配置）：</p>
+      <h2><span class="num">02</span> Source map</h2>
+      <p>The whole project is basically these files (plus config):</p>
       <pre class="tree"><span class="dir">src/</span>
-├── <span class="file">index.ts</span>      <span class="note"># CLI：REPL / 单次 -p</span>
-├── <span class="file">agent.ts</span>      <span class="note"># ★ Agent loop（核心）</span>
+├── <span class="file">index.ts</span>      <span class="note"># CLI: REPL / one-shot -p</span>
+├── <span class="file">agent.ts</span>      <span class="note"># ★ Agent loop (core)</span>
 ├── <span class="file">tools.ts</span>      <span class="note"># read / write / edit / bash</span>
-├── <span class="file">llm.ts</span>        <span class="note"># OpenAI 兼容客户端（默认 xAI）</span>
-├── <span class="file">system.ts</span>     <span class="note"># 极简 system prompt</span>
-└── <span class="file">tools.test.ts</span> <span class="note"># 工具冒烟测试（无 API）</span></pre>
+├── <span class="file">llm.ts</span>        <span class="note"># OpenAI-compatible client (default xAI)</span>
+├── <span class="file">system.ts</span>     <span class="note"># minimal system prompt</span>
+└── <span class="file">tools.test.ts</span> <span class="note"># tool smoke tests (no API)</span></pre>
       <div class="grid-2">
         <div class="card">
-          <div class="tag">入口</div>
+          <div class="tag">Entry</div>
           <h4>index.ts</h4>
-          <p>解析参数、读 API key、交互输入，把用户消息交给 <code class="inline">runAgent</code>。</p>
+          <p>Parses args, reads the API key, takes interactive input, and hands user messages to <code class="inline">runAgent</code>.</p>
         </div>
         <div class="card">
-          <div class="tag">大脑</div>
+          <div class="tag">Brain</div>
           <h4>agent.ts</h4>
-          <p>维护 <code class="inline">messages[]</code>，反复调模型；有 tool_calls 就执行再塞回。</p>
+          <p>Owns <code class="inline">messages[]</code>, calls the model repeatedly; when there are tool_calls, executes them and appends results.</p>
         </div>
         <div class="card">
-          <div class="tag">手脚</div>
+          <div class="tag">Hands</div>
           <h4>tools.ts</h4>
-          <p>工具的 JSON Schema（给模型看）+ 本地执行实现（真正改磁盘）。</p>
+          <p>Tool JSON Schema (what the model sees) + local execution (what actually touches disk).</p>
         </div>
         <div class="card">
-          <div class="tag">通道</div>
+          <div class="tag">Channel</div>
           <h4>llm.ts</h4>
-          <p>用 OpenAI SDK 连 <code class="inline">api.x.ai</code> 或任意兼容端点。</p>
+          <p>Uses the OpenAI SDK against <code class="inline">api.x.ai</code> or any compatible endpoint.</p>
         </div>
       </div>
     </section>
 
     <!-- 3 loop -->
     <section id="loop">
-      <h2><span class="num">03</span> Agent Loop（全部核心）</h2>
+      <h2><span class="num">03</span> Agent loop (the whole core)</h2>
       <p>
-        <code class="inline">runAgent</code> 本质是一张<strong>状态机</strong>。
-        点「下一步」按一次典型任务走完：
-        <em style="color:var(--text)">「创建一个 hello.ts」</em>
-        （有工具调用时走回环，没有则结束）。
+        <code class="inline">runAgent</code> is essentially a <strong>state machine</strong>.
+        Click “Next” to walk through a typical task:
+        <em style="color:var(--text)">“Create a hello.ts”</em>
+        (loop back when there are tool calls; finish when there aren’t).
       </p>
 
       <div class="loop">
@@ -713,13 +713,13 @@
 
             <g class="node" data-node="assemble" transform="translate(320, 98)">
               <rect class="node-box process" x="-90" y="-30" width="180" height="60" />
-              <text class="node-title" y="-6">组装 messages</text>
+              <text class="node-title" y="-6">Assemble messages</text>
               <text class="node-sub" y="14">system + history + user</text>
             </g>
 
             <g class="node" data-node="llm" transform="translate(320, 188)">
               <rect class="node-box process" x="-90" y="-30" width="180" height="60" />
-              <text class="node-title" y="-6">调用模型</text>
+              <text class="node-title" y="-6">Call model</text>
               <text class="node-sub" y="14">chat.completions + tools</text>
             </g>
 
@@ -727,12 +727,12 @@
             <g class="node" data-node="decide" transform="translate(320, 292)">
               <polygon class="node-box" points="0,-44 64,0 0,44 -64,0" />
               <text class="node-title" y="-4">tool_calls?</text>
-              <text class="node-sub" y="14">判定</text>
+              <text class="node-sub" y="14">branch</text>
             </g>
 
             <g class="node" data-node="tools" transform="translate(170, 348)">
               <rect class="node-box process" x="-78" y="-30" width="156" height="60" />
-              <text class="node-title" y="-6">执行工具</text>
+              <text class="node-title" y="-6">Run tools</text>
               <text class="node-sub" y="14">read / write / edit / bash</text>
             </g>
 
@@ -745,20 +745,20 @@
 
         <div class="sm-caption" id="sm-caption">
           <div class="step-tag" id="sm-step-tag">STEP 0 / 6</div>
-          <h4 id="sm-title">准备出发</h4>
-          <p id="sm-desc">状态机停在 Start。点「下一步」开始组装本轮对话上下文。</p>
+          <h4 id="sm-title">Ready to go</h4>
+          <p id="sm-desc">The state machine sits at Start. Click “Next” to assemble this turn’s conversation context.</p>
         </div>
 
         <div class="loop-controls">
-          <button type="button" id="loop-prev">← 上一步</button>
-          <button type="button" id="loop-next">下一步 →</button>
-          <button type="button" id="loop-reset">重置</button>
+          <button type="button" id="loop-prev">← Prev</button>
+          <button type="button" id="loop-next">Next →</button>
+          <button type="button" id="loop-reset">Reset</button>
           <span class="step-count" id="sm-count">0 / 6</span>
         </div>
       </div>
 
-      <h3>一次真实的 messages 长什么样</h3>
-      <p>简化示意（不是完整 JSON）：</p>
+      <h3>What a real messages list looks like</h3>
+      <p>Simplified sketch (not full JSON):</p>
       <div class="msg-stack">
         <div class="msg system">
           <div class="role">system</div>
@@ -782,52 +782,52 @@
         </div>
       </div>
       <p>
-        关键：模型<strong>从不直接碰磁盘</strong>。它只输出结构化请求；
-        你的 <code class="inline">tools.ts</code> 才是真正改世界的那一层。
+        Key point: the model <strong>never touches the disk directly</strong>. It only emits structured requests;
+        your <code class="inline">tools.ts</code> is the layer that actually changes the world.
       </p>
     </section>
 
     <!-- 4 tools -->
     <section id="tools">
-      <h2><span class="num">04</span> 四个工具</h2>
+      <h2><span class="num">04</span> The four tools</h2>
       <p>
-        每个工具有两面：<strong>Schema</strong>（描述给模型）和 <strong>实现</strong>（在 Node 里执行）。
-        模型看到的是名字、说明和 JSON 参数；它填参数，你跑代码。
+        Every tool has two faces: a <strong>schema</strong> (described to the model) and an <strong>implementation</strong> (run in Node).
+        The model sees names, descriptions, and JSON parameters; it fills them in, and you run the code.
       </p>
       <div class="grid-2">
         <div class="card tool-read">
-          <div class="tag">fs.readFile + 行号</div>
+          <div class="tag">fs.readFile + line numbers</div>
           <h4>read</h4>
-          <p>读文件，可带 offset/limit。返回带行号的内容，方便模型引用。</p>
+          <p>Read a file, optional offset/limit. Returns numbered lines so the model can cite them.</p>
         </div>
         <div class="card tool-write">
           <div class="tag">fs.writeFile</div>
           <h4>write</h4>
-          <p>创建或覆盖整文件，自动建父目录。适合新文件或大改。</p>
+          <p>Create or overwrite a whole file; creates parent dirs. Good for new files or big rewrites.</p>
         </div>
         <div class="card tool-edit">
-          <div class="tag">精确字符串替换</div>
+          <div class="tag">exact string replace</div>
           <h4>edit</h4>
-          <p><code class="inline">old_string</code> → <code class="inline">new_string</code>。默认只允许匹配一次（防误伤）。</p>
+          <p><code class="inline">old_string</code> → <code class="inline">new_string</code>. By default only one match is allowed (avoids collateral damage).</p>
         </div>
         <div class="card tool-bash">
           <div class="tag">bash -lc</div>
           <h4>bash</h4>
-          <p>在工作区跑 shell：ls、git、测试……有超时与输出截断。</p>
+          <p>Run shell in the workspace: ls, git, tests… with timeout and output truncation.</p>
         </div>
       </div>
-      <h3>为什么是「精确替换」而不是 diff</h3>
+      <h3>Why exact replace instead of a diff</h3>
       <p>
-        和 Pi / Claude Code 一类工具一样：让模型给出<strong>能在文件里唯一命中的原文</strong>再替换。
-        简单、可预测；匹配 0 次或多次会报错，逼模型 <code class="inline">read</code> 后再试。
+        Same idea as tools like Pi / Claude Code: the model provides <strong>original text that uniquely matches in the file</strong>, then we replace it.
+        Simple and predictable; 0 or many matches error out, which forces the model to <code class="inline">read</code> and try again.
       </p>
     </section>
 
     <!-- 5 code -->
     <section id="code">
-      <h2><span class="num">05</span> 关键代码片段</h2>
+      <h2><span class="num">05</span> Key code snippets</h2>
 
-      <h3>System prompt（几乎就这么短）</h3>
+      <h3>System prompt (almost this short)</h3>
       <pre><span class="k">export function</span> <span class="f">buildSystemPrompt</span>(cwd: <span class="n">string</span>): <span class="n">string</span> {
   <span class="k">return</span> <span class="s">`You are a coding agent in a terminal. Work in: ${cwd}
 
@@ -838,7 +838,7 @@ You have four tools: read, write, edit, bash.
 - After tools finish, give a short summary of what you did.`</span>;
 }</pre>
 
-      <h3>Loop 的心脏</h3>
+      <h3>The heart of the loop</h3>
       <pre><span class="k">for</span> (<span class="k">let</span> turn = <span class="n">0</span>; turn &lt; maxTurns; turn++) {
   <span class="k">const</span> response = <span class="k">await</span> client.chat.completions.<span class="f">create</span>({
     model,
@@ -851,82 +851,86 @@ You have four tools: read, write, edit, bash.
   messages.<span class="f">push</span>({ role: <span class="s">"assistant"</span>, content: msg.content, tool_calls: msg.tool_calls });
 
   <span class="k">const</span> toolCalls = msg.tool_calls ?? [];
-  <span class="k">if</span> (toolCalls.length === <span class="n">0</span>) <span class="k">return</span> messages;  <span class="c">// 模型做完了</span>
+  <span class="k">if</span> (toolCalls.length === <span class="n">0</span>) <span class="k">return</span> messages;  <span class="c">// model is done</span>
 
   <span class="k">for</span> (<span class="k">const</span> call <span class="k">of</span> toolCalls) {
     <span class="k">const</span> result = <span class="k">await</span> <span class="f">executeTool</span>(cwd, call.function.name, call.function.arguments);
     messages.<span class="f">push</span>({ role: <span class="s">"tool"</span>, tool_call_id: call.id, content: result.output });
   }
-  <span class="c">// 带着 tool 结果再进下一轮 for</span>
+  <span class="c">// next for-iteration with tool results in context</span>
 }</pre>
 
-      <h3>本地跑起来</h3>
-      <pre><span class="c"># 仓库根目录</span>
+      <h3>Run it locally</h3>
+      <pre><span class="c"># from repo root</span>
 npm install
 <span class="k">export</span> XAI_API_KEY=xai-...
 
 npm run dev -- -p <span class="s">"List files and create a hello.ts"</span>
-npm run dev   <span class="c"># 交互 REPL；/reset 清历史，/exit 退出</span></pre>
+npm run dev   <span class="c"># interactive REPL; /reset clears history, /exit quits</span></pre>
     </section>
 
     <!-- 6 not -->
     <section id="not">
-      <h2><span class="num">06</span> 刻意没有的东西</h2>
-      <p>不是做不到，是学习版先砍掉，避免核心被淹没：</p>
+      <h2><span class="num">06</span> Intentionally missing</h2>
+      <p>Not because we can’t — the learning cut keeps the core uncluttered:</p>
       <div class="not-grid">
-        <div class="not-item">Session 落盘 / resume</div>
-        <div class="not-item">Session 树 / branch</div>
-        <div class="not-item">权限沙箱 / 审批弹窗</div>
+        <div class="not-item">Session persistence / resume</div>
+        <div class="not-item">Session tree / branch</div>
+        <div class="not-item">Permission sandbox / approval UI</div>
         <div class="not-item">MCP / Skills / Extensions</div>
         <div class="not-item">Subagent / Plan mode</div>
-        <div class="not-item">富文本 TUI</div>
-        <div class="not-item">精确 tokenizer 计费</div>
-        <div class="not-item">多模型热切换 UI</div>
+        <div class="not-item">Rich TUI</div>
+        <div class="not-item">Exact tokenizer billing</div>
+        <div class="not-item">Multi-model hot-switch UI</div>
       </div>
-      <p>真正的 Pi 用扩展系统把这些能力加回去；OpenClaw 等产品则在类似内核上接聊天通道。</p>
+      <p>Real Pi layers these back on via an extension system; products like OpenClaw attach chat channels on a similar core.</p>
     </section>
 
     <!-- 7 next -->
     <section id="next">
-      <h2><span class="num">07</span> 如果你想接着长</h2>
+      <h2><span class="num">07</span> If you want to grow it</h2>
       <table>
         <thead>
-          <tr><th>方向</th><th>做什么</th></tr>
+          <tr><th>Direction</th><th>What to do</th></tr>
         </thead>
         <tbody>
           <tr>
             <td>Streaming</td>
-            <td>已实现（默认开启）。详见 <a href="./streaming.html">Streaming 讲解页</a>；可用 <code class="inline">--no-stream</code> 关闭</td>
+            <td>Implemented (on by default). See the <a href="./streaming.html">Streaming walkthrough</a>; disable with <code class="inline">--no-stream</code></td>
           </tr>
           <tr>
             <td>Session JSONL</td>
-            <td>已实现。详见 <a href="./sessions.html">Sessions 讲解页</a> · <code class="inline">--continue</code> / <code class="inline">--resume</code></td>
+            <td>Implemented. See the <a href="./sessions.html">Sessions walkthrough</a> · <code class="inline">--continue</code> / <code class="inline">--resume</code></td>
           </tr>
           <tr>
             <td>AGENTS.md</td>
-            <td>已实现。详见 <a href="./agents.html">AGENTS.md 讲解页</a>；可用 <code class="inline">-nc</code> 关闭</td>
+            <td>Implemented. See the <a href="./agents.html">AGENTS.md walkthrough</a>; disable with <code class="inline">-nc</code></td>
           </tr>
           <tr>
             <td>Extensions</td>
-            <td>从目录动态 import 额外工具，支持热重载</td>
+            <td>Dynamically import extra tools from a directory, with hot reload</td>
           </tr>
           <tr>
             <td>Compaction</td>
-            <td>已实现。详见 <a href="./compact.html">Compaction 讲解页</a>；<code class="inline">/compact</code> · <code class="inline">--no-compact</code></td>
+            <td>Implemented. See the <a href="./compact.html">Compaction walkthrough</a>; <code class="inline">/compact</code> · <code class="inline">--no-compact</code></td>
           </tr>
         </tbody>
       </table>
       <div class="callout">
-        学完 mini-pi 再去读 <a href="https://github.com/earendil-works/pi" target="_blank" rel="noopener">earendil-works/pi</a>
-        会轻松很多——你会认出同一个 loop，只是外壳厚得多。
+        After mini-pi, reading <a href="https://github.com/earendil-works/pi" target="_blank" rel="noopener">earendil-works/pi</a>
+        is much easier — you’ll recognize the same loop, just with a thicker shell.
       </div>
     </section>
 
     <footer>
-      <span>mini-pi · MIT · 仅供学习</span>
+      <span>mini-pi · MIT · for learning only</span>
       <span>
-        灵感来自 <a href="https://pi.dev">Pi</a> ·
-        <a href="https://github.com/giggling-ginger/mini-pi">GitHub</a>
+        Inspired by <a href="https://pi.dev">Pi</a> ·
+        <a href="https://github.com/giggling-ginger/mini-pi">GitHub</a> ·
+        <a href="./streaming.html">Streaming</a> ·
+        <a href="./sessions.html">Sessions</a> ·
+        <a href="./agents.html">AGENTS.md</a> ·
+        <a href="./compact.html">Compaction</a>
       </span>
     </footer>
   </div>
@@ -942,43 +946,43 @@ npm run dev   <span class="c"># 交互 REPL；/reset 清历史，/exit 退出</s
           nodes: ["start"],
           edges: [],
           title: "Start",
-          desc: "用户输入任务。状态机进入，准备构建本轮 messages。",
+          desc: "User enters a task. The state machine starts and prepares to build this turn’s messages.",
         },
         {
           nodes: ["assemble"],
           edges: ["start-assemble"],
-          title: "组装 messages",
-          desc: "system prompt +（可选）历史 + 本轮 user。这是模型能看到的全部上下文。",
+          title: "Assemble messages",
+          desc: "system prompt + (optional) history + this turn’s user message. That is all the model can see.",
         },
         {
           nodes: ["llm"],
           edges: ["assemble-llm"],
-          title: "调用模型",
-          desc: "chat.completions.create，带上 tools 定义，tool_choice: \"auto\"。",
+          title: "Call model",
+          desc: "chat.completions.create with tool definitions, tool_choice: \"auto\".",
         },
         {
           nodes: ["decide"],
           edges: ["llm-decide"],
-          title: "判定：有 tool_calls？",
-          desc: "assistant 回复可能含文字和/或 tool_calls（例如 write hello.ts）。先 append assistant，再分支。",
+          title: "Branch: any tool_calls?",
+          desc: "The assistant reply may include text and/or tool_calls (e.g. write hello.ts). Append assistant first, then branch.",
         },
         {
           nodes: ["tools"],
           edges: ["decide-tools"],
-          title: "yes → 执行工具",
-          desc: "executeTool() 真正写文件 / 跑 bash。结果以 role: \"tool\" 写回 messages。",
+          title: "yes → run tools",
+          desc: "executeTool() actually writes files / runs bash. Results go back into messages as role: \"tool\".",
         },
         {
           nodes: ["llm"],
           edges: ["tools-llm"],
-          title: "回环：带着结果再调模型",
-          desc: "工具结果进入上下文，再次 Call LLM。可能继续工具，也可能只输出总结。",
+          title: "Loop: call model with results",
+          desc: "Tool results enter context; Call LLM again. It may keep using tools or just emit a summary.",
         },
         {
           nodes: ["done"],
           edges: ["llm-decide", "decide-done"],
           title: "no → Done",
-          desc: "没有 tool_calls，结束循环，返回 history。CLI 打印最终文字。默认最多 30 轮。",
+          desc: "No tool_calls — end the loop and return history. The CLI prints the final text. Default max is 30 turns.",
         },
       ];
 

@@ -6,13 +6,15 @@
 
 A **minimal Pi-inspired coding agent** for learning how agent harnesses work.
 
-**讲解网页：**
+**Walkthrough docs (中文 / English):**
 
-- 总览：[docs/index.html](./docs/index.html) · [Pages](https://giggling-ginger.github.io/mini-pi/)
-- **Streaming 原理**：[docs/streaming.html](./docs/streaming.html) · [Pages](https://giggling-ginger.github.io/mini-pi/streaming.html)
-- **Sessions 原理**：[docs/sessions.html](./docs/sessions.html) · [Pages](https://giggling-ginger.github.io/mini-pi/sessions.html)
-- **AGENTS.md 原理**：[docs/agents.html](./docs/agents.html) · [Pages](https://giggling-ginger.github.io/mini-pi/agents.html)
-- **Compaction 原理**：[docs/compact.html](./docs/compact.html) · [Pages](https://giggling-ginger.github.io/mini-pi/compact.html)
+| Topic | 中文 | English | GitHub Pages |
+|-------|------|---------|--------------|
+| Overview | [docs/index.html](./docs/index.html) | [docs/en/index.html](./docs/en/index.html) | [ZH](https://giggling-ginger.github.io/mini-pi/) · [EN](https://giggling-ginger.github.io/mini-pi/en/) |
+| Streaming | [streaming.html](./docs/streaming.html) | [en/streaming.html](./docs/en/streaming.html) | [ZH](https://giggling-ginger.github.io/mini-pi/streaming.html) · [EN](https://giggling-ginger.github.io/mini-pi/en/streaming.html) |
+| Sessions | [sessions.html](./docs/sessions.html) | [en/sessions.html](./docs/en/sessions.html) | [ZH](https://giggling-ginger.github.io/mini-pi/sessions.html) · [EN](https://giggling-ginger.github.io/mini-pi/en/sessions.html) |
+| AGENTS.md | [agents.html](./docs/agents.html) | [en/agents.html](./docs/en/agents.html) | [ZH](https://giggling-ginger.github.io/mini-pi/agents.html) · [EN](https://giggling-ginger.github.io/mini-pi/en/agents.html) |
+| Compaction | [compact.html](./docs/compact.html) | [en/compact.html](./docs/en/compact.html) | [ZH](https://giggling-ginger.github.io/mini-pi/compact.html) · [EN](https://giggling-ginger.github.io/mini-pi/en/compact.html) |
 
 Philosophy (inspired by [Pi](https://pi.dev)):
 

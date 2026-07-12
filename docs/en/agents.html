@@ -1,10 +1,10 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>AGENTS.md 原理 · mini-pi</title>
-  <meta name="description" content="讲解 AGENTS.md 如何被发现并注入 coding agent 的 system prompt" />
+  <title>AGENTS.md · mini-pi</title>
+  <meta name="description" content="How AGENTS.md is discovered and injected into the coding agent's system prompt" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
@@ -257,92 +257,91 @@
       <div class="inner">
         <a class="brand" href="./index.html">mini-<span>pi</span> · agents.md</a>
         <div class="links">
-          <a href="./index.html">总览</a>
+          <a href="./index.html">Overview</a>
           <a href="./streaming.html">Streaming</a>
           <a href="./sessions.html">Sessions</a>
           <a href="./compact.html">Compaction</a>
-          <a href="#why">为什么</a>
-          <a href="#discover">发现</a>
-          <a href="#inject">注入</a>
-          <a href="#demo">演示</a>
-          <a href="#write">怎么写</a>
+          <a href="#why">Why</a>
+          <a href="#discover">Discover</a>
+          <a href="#inject">Inject</a>
+          <a href="#demo">Demo</a>
+          <a href="#write">How to write</a>
+          <a href="../agents.html">中文</a>
           <a href="https://github.com/giggling-ginger/mini-pi" target="_blank" rel="noopener">GitHub ↗</a>
-          <a href="./en/agents.html">EN</a>
-          <a href="./agents.html">中文</a>
         </div>
       </div>
     </nav>
 
     <header class="hero">
       <div class="badge">AGENTS.md · Project instructions</div>
-      <h1>项目规则怎么进<br />模型的 <em>system prompt</em></h1>
+      <h1>How project rules enter<br />the model’s <em>system prompt</em></h1>
       <p class="lead">
-        mini-pi 的 system prompt 故意很短。项目约定（包管理器、测试命令、目录结构……）
-        不写死在代码里，而是读仓库里的 <code class="inline">AGENTS.md</code>，拼到 system 后面。
+        mini-pi’s system prompt is intentionally short. Project conventions (package manager, test commands, directory layout…)
+        are not hard-coded—they are read from <code class="inline">AGENTS.md</code> in the repo and appended to system.
       </p>
       <p class="lead" style="font-size:0.95rem">
-        源码：<code class="inline">src/context-files.ts</code> · <code class="inline">src/system.ts</code>
+        Source: <code class="inline">src/context-files.ts</code> · <code class="inline">src/system.ts</code>
       </p>
     </header>
 
     <section id="why">
-      <h2><span class="num">01</span> 为什么需要它</h2>
+      <h2><span class="num">01</span> Why you need it</h2>
       <div class="grid-2">
         <div class="card">
-          <h4>没有 AGENTS.md</h4>
+          <h4>Without AGENTS.md</h4>
           <p>
-            模型只知道「你是 coding agent + 四个工具」。
-            不知道你们用 pnpm 还是 npm，测试怎么跑，哪些目录别乱动。
+            The model only knows “you are a coding agent + four tools.”
+            It does not know whether you use pnpm or npm, how to run tests, or which directories to leave alone.
           </p>
         </div>
         <div class="card">
-          <h4>有 AGENTS.md</h4>
+          <h4>With AGENTS.md</h4>
           <p>
-            启动时读进 system prompt。每一轮 API 调用都带着这些规则
-            （system 不进 session 文件，但每次会重新加载最新磁盘内容）。
+            Loaded into the system prompt at startup. Every API round-trip carries these rules
+            (system is not stored in the session file, but the latest on-disk content is reloaded each time).
           </p>
         </div>
       </div>
       <div class="callout">
-        <strong>和 Session 的分工：</strong>
-        Session 记「我们聊过什么」；AGENTS.md 记「这个仓库的规矩」。
-        前者是对话历史，后者是项目说明书。
+        <strong>Division of labor with Session:</strong>
+        Session remembers “what we talked about”; AGENTS.md remembers “the rules of this repo.”
+        The former is conversation history; the latter is the project manual.
       </div>
     </section>
 
     <section id="discover">
-      <h2><span class="num">02</span> 怎么「发现」文件</h2>
-      <p>从 <code class="inline">cwd</code> 开始，一路走到 <strong>git 根目录</strong>（有 <code class="inline">.git</code> 的那层），沿途找：</p>
+      <h2><span class="num">02</span> How files are “discovered”</h2>
+      <p>Starting from <code class="inline">cwd</code>, walk up to the <strong>git root</strong> (the level that has <code class="inline">.git</code>), looking along the way for:</p>
       <ul class="plain">
-        <li><code class="inline">AGENTS.md</code>（优先）</li>
-        <li>否则 <code class="inline">CLAUDE.md</code></li>
-        <li>否则 <code class="inline">AGENT.md</code></li>
+        <li><code class="inline">AGENTS.md</code> (preferred)</li>
+        <li>else <code class="inline">CLAUDE.md</code></li>
+        <li>else <code class="inline">AGENT.md</code></li>
       </ul>
-      <p>每个目录只取<strong>一个</strong>；更靠近 cwd 的文件排在后面（更具体）。</p>
+      <p>Only <strong>one</strong> file per directory; files closer to cwd come later (more specific).</p>
 
-      <pre class="tree"><span class="dir">repo/</span>                          <span class="note"># git root = 停止向上</span>
-├── <span class="hit">AGENTS.md</span>                  <span class="note"># ① 先收集（全局约定）</span>
+      <pre class="tree"><span class="dir">repo/</span>                          <span class="note"># git root = stop walking up</span>
+├── <span class="hit">AGENTS.md</span>                  <span class="note"># ① collected first (global conventions)</span>
 ├── package.json
-└── <span class="dir">packages/app/</span>              <span class="note"># 你在这里跑 mini-pi</span>
-    ├── <span class="hit">AGENTS.md</span>              <span class="note"># ② 后收集（包级约定）</span>
+└── <span class="dir">packages/app/</span>              <span class="note"># you run mini-pi here</span>
+    ├── <span class="hit">AGENTS.md</span>              <span class="note"># ② collected later (package-level)</span>
     └── src/...</pre>
 
       <div class="callout">
-        <strong>预算：</strong>全部 context 文件合计最多约 32KB 字符，超出截断并标注
-        <code class="inline">[truncated]</code>，避免单个巨型 markdown 撑爆上下文。
+        <strong>Budget:</strong> all context files combined are capped at about 32KB of characters; overflow is truncated and marked
+        <code class="inline">[truncated]</code>, so one giant markdown file cannot blow up the context.
       </div>
     </section>
 
     <section id="inject">
-      <h2><span class="num">03</span> 怎么塞进 prompt</h2>
-      <p>每一轮发给模型的消息大致是这样一块「三明治」：</p>
+      <h2><span class="num">03</span> How it is injected into the prompt</h2>
+      <p>Each round of messages sent to the model is roughly this “sandwich”:</p>
       <div class="sandwich">
         <div class="layer base">
-          <div class="lbl">system · base（代码写死，很短）</div>
+          <div class="lbl">system · base (hard-coded, very short)</div>
           <div class="body">You are a coding agent… four tools: read, write, edit, bash…</div>
         </div>
         <div class="layer ctx">
-          <div class="lbl">system · project instructions（AGENTS.md 拼上）</div>
+          <div class="lbl">system · project instructions (AGENTS.md appended)</div>
           <div class="body"># Project instructions
 ### AGENTS.md
 <em>Use pnpm. Run tests with vitest…</em>
@@ -350,19 +349,19 @@
 <em>Prefer colocated tests…</em></div>
         </div>
         <div class="layer hist">
-          <div class="lbl">history（来自 session，不含 system）</div>
+          <div class="lbl">history (from session, no system)</div>
           <div class="body">user / assistant / tool / …</div>
         </div>
         <div class="layer user">
-          <div class="lbl">本轮 user</div>
+          <div class="lbl">this turn’s user</div>
           <div class="body">add a failing test for parseArgs</div>
         </div>
       </div>
-      <pre><span class="c">// system.ts（简化）</span>
+      <pre><span class="c">// system.ts (simplified)</span>
 <span class="k">const</span> files = <span class="f">loadContextFiles</span>({ cwd })
 <span class="k">const</span> prompt =
   <span class="f">buildBaseSystemPrompt</span>(cwd) +
-  <span class="f">formatContextBlock</span>(files)   <span class="c">// 没有文件则是空字符串</span>
+  <span class="f">formatContextBlock</span>(files)   <span class="c">// empty string if no files</span>
 
 messages = [
   { role: <span class="s">"system"</span>, content: prompt },
@@ -370,14 +369,14 @@ messages = [
   { role: <span class="s">"user"</span>, content: userMessage },
 ]</pre>
       <p>
-        因此：你改了 AGENTS.md 再开一轮（或新 session），模型立刻读到新规则——
-        <strong>不必清 session</strong>（system 每次重建）。
+        So: edit AGENTS.md and start a new turn (or a new session), and the model sees the new rules immediately—
+        <strong>no need to clear the session</strong> (system is rebuilt every time).
       </p>
     </section>
 
     <section id="demo">
-      <h2><span class="num">04</span> 交互演示：向上走</h2>
-      <p>假设 cwd 在 <code class="inline">packages/app</code>，看发现顺序：</p>
+      <h2><span class="num">04</span> Interactive demo: walking up</h2>
+      <p>Assume cwd is <code class="inline">packages/app</code>; watch the discovery order:</p>
       <div class="walk">
         <div class="walk-meta">
           step: <strong id="walk-step">0</strong> ·
@@ -385,25 +384,25 @@ messages = [
         </div>
         <div id="walk-rows"></div>
         <div class="demo-controls">
-          <button type="button" class="primary" id="walk-next">下一步 →</button>
-          <button type="button" id="walk-reset">重置</button>
+          <button type="button" class="primary" id="walk-next">Next →</button>
+          <button type="button" id="walk-reset">Reset</button>
         </div>
       </div>
     </section>
 
     <section id="write">
-      <h2><span class="num">05</span> AGENTS.md 写什么好</h2>
+      <h2><span class="num">05</span> What belongs in AGENTS.md</h2>
       <div class="grid-2">
         <div class="card">
-          <h4>适合写</h4>
-          <p>包管理器、测试/构建命令、目录约定、禁止事项、PR/commit 风格、和本仓库相关的工具偏好。</p>
+          <h4>Good fits</h4>
+          <p>Package manager, test/build commands, directory conventions, hard don’ts, PR/commit style, and tool preferences specific to this repo.</p>
         </div>
         <div class="card">
-          <h4>别塞爆</h4>
-          <p>整本设计文档、巨型 API 列表、会过期的临时 TODO——会占上下文且干扰模型。保持短、可执行。</p>
+          <h4>Don’t bloat it</h4>
+          <p>Full design docs, giant API lists, or temporary TODOs that will go stale—they burn context and distract the model. Keep it short and actionable.</p>
         </div>
       </div>
-      <pre><span class="c"># AGENTS.md 示例</span>
+      <pre><span class="c"># AGENTS.md example</span>
 
 ## Stack
 - Node 20 + TypeScript ESM
@@ -421,67 +420,68 @@ messages = [
       <h2><span class="num">06</span> CLI / REPL</h2>
       <table>
         <thead>
-          <tr><th>命令</th><th>作用</th></tr>
+          <tr><th>Command</th><th>Effect</th></tr>
         </thead>
         <tbody>
           <tr>
-            <td>（默认）</td>
-            <td>自动加载 AGENTS.md 等，启动时打印路径</td>
+            <td>(default)</td>
+            <td>Auto-load AGENTS.md and friends; print paths at startup</td>
           </tr>
           <tr>
             <td><code class="inline">--no-context-files</code> / <code class="inline">-nc</code></td>
-            <td>本 run 不加载（对照实验很有用）</td>
+            <td>Skip loading for this run (handy for A/B checks)</td>
           </tr>
           <tr>
             <td>REPL <code class="inline">/context</code></td>
-            <td>列出当前加载了哪些文件和字符数</td>
+            <td>List currently loaded files and character counts</td>
           </tr>
         </tbody>
       </table>
-      <pre>npm run dev -- -p <span class="s">"跑一下 typecheck"</span>
-<span class="c"># stderr 可能看到: context 1 file(s): AGENTS.md</span>
+      <pre>npm run dev -- -p <span class="s">"run typecheck"</span>
+<span class="c"># stderr may show: context 1 file(s): AGENTS.md</span>
 
-npm run dev -- -nc -p <span class="s">"同一任务但不读 AGENTS.md"</span></pre>
+npm run dev -- -nc -p <span class="s">"same task, but without AGENTS.md"</span></pre>
     </section>
 
     <section id="pitfalls">
-      <h2><span class="num">07</span> 常见误解</h2>
+      <h2><span class="num">07</span> Common misconceptions</h2>
       <table>
         <thead>
-          <tr><th>误解</th><th>实际</th></tr>
+          <tr><th>Myth</th><th>Reality</th></tr>
         </thead>
         <tbody>
           <tr>
-            <td>AGENTS.md 会存进 session JSONL</td>
-            <td>不存。system 每次现拼，改文件立即生效</td>
+            <td>AGENTS.md is stored in the session JSONL</td>
+            <td>It is not. System is rebuilt every time; file edits take effect immediately</td>
           </tr>
           <tr>
-            <td>和 skills / MCP 一样</td>
-            <td>只是文本说明书，不注册新工具</td>
+            <td>Same as skills / MCP</td>
+            <td>Just a text manual—it does not register new tools</td>
           </tr>
           <tr>
-            <td>模型一定会 100% 遵守</td>
-            <td>仍是 soft instructions；写清楚 + 简短更有效</td>
+            <td>The model will obey 100%</td>
+            <td>Still soft instructions; clear and short works better</td>
           </tr>
           <tr>
-            <td>子目录 CLAUDE.md 和 AGENTS.md 会合并</td>
-            <td>同目录只取优先级最高的一个名字</td>
+            <td>Subdir CLAUDE.md and AGENTS.md are merged</td>
+            <td>Only the highest-priority name is taken per directory</td>
           </tr>
         </tbody>
       </table>
       <div class="callout">
-        <strong>一句话：</strong>AGENTS.md = 可版本管理的项目 system 附录。
-        Harness 负责找到它并拼进 prompt；写得好不好，决定 agent 像不像「你们队的人」。
+        <strong>In one line:</strong> AGENTS.md = a version-controlled project system appendix.
+        The harness finds it and stitches it into the prompt; how well you write it decides whether the agent feels like “one of your team.”
       </div>
     </section>
 
     <footer>
       <span>
-        <a href="./index.html">← 总览</a> ·
+        <a href="./index.html">← Overview</a> ·
         <a href="./streaming.html">Streaming</a> ·
-        <a href="./sessions.html">Sessions</a>
+        <a href="./sessions.html">Sessions</a> ·
+        <a href="./compact.html">Compaction</a>
       </span>
-      <span>mini-pi · MIT · 仅供学习</span>
+      <span>mini-pi · MIT · for learning</span>
     </footer>
   </div>
 

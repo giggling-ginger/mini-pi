@@ -1,10 +1,10 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Sessions 原理 · mini-pi</title>
-  <meta name="description" content="讲解 mini-pi 如何用 JSONL 把 agent 对话存盘、续聊与 resume" />
+  <title>Sessions · mini-pi</title>
+  <meta name="description" content="How mini-pi persists agent conversations as JSONL, continues chats, and resumes sessions" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
@@ -274,158 +274,158 @@
       <div class="inner">
         <a class="brand" href="./index.html">mini-<span>pi</span> · sessions</a>
         <div class="links">
-          <a href="./index.html">总览</a>
+          <a href="./index.html">Overview</a>
           <a href="./streaming.html">Streaming</a>
           <a href="./agents.html">AGENTS.md</a>
           <a href="./compact.html">Compaction</a>
-          <a href="#why">为什么</a>
+          <a href="#why">Why</a>
           <a href="#jsonl">JSONL</a>
-          <a href="#loop">和 loop</a>
-          <a href="#demo">演示</a>
-          <a href="#cli">命令</a>
+          <a href="#loop">Loop</a>
+          <a href="#demo">Demo</a>
+          <a href="#cli">CLI</a>
           <a href="https://github.com/giggling-ginger/mini-pi" target="_blank" rel="noopener">GitHub ↗</a>
-          <a href="./en/sessions.html">EN</a>
-          <a href="./sessions.html">中文</a>
+          <a href="../sessions.html">中文</a>
         </div>
       </div>
     </nav>
 
     <header class="hero">
       <div class="badge">Sessions · JSONL on disk</div>
-      <h1>对话为什么能<br /><em>关掉再续上</em></h1>
+      <h1>Why a chat can<br /><em>survive a restart</em></h1>
       <p class="lead">
-        Agent 的记忆就是内存里那串 <code class="inline">messages[]</code>。
-        Session 做的事很朴素：把它<strong>一行行写到磁盘</strong>；下次启动再<strong>读回来</strong>塞进 loop。
+        An agent’s memory is just the in-memory <code class="inline">messages[]</code> array.
+        Session does something simple: <strong>write it to disk line by line</strong>, then on the next start
+        <strong>read it back</strong> into the loop.
       </p>
       <p class="lead" style="font-size:0.95rem">
-        对应源码：<code class="inline">src/session.ts</code> + CLI 里的 <code class="inline">--continue</code> / <code class="inline">--resume</code>。
+        Source: <code class="inline">src/session.ts</code> + CLI flags <code class="inline">--continue</code> / <code class="inline">--resume</code>.
       </p>
     </header>
 
     <section id="why">
-      <h2><span class="num">01</span> 没有 session 时会发生什么</h2>
+      <h2><span class="num">01</span> What happens without a session</h2>
       <div class="grid-2">
         <div class="card">
-          <h4>只有内存</h4>
+          <h4>Memory only</h4>
           <p>
-            REPL 里 <code class="inline">history</code> 是个数组。进程退出 → 数组没了 →
-            模型完全不记得你刚让它写的文件上下文（当然磁盘上的代码还在）。
+            In the REPL, <code class="inline">history</code> is just an array. Process exits → array is gone →
+            the model has no memory of the file context you just built (the code on disk still exists, of course).
           </p>
         </div>
         <div class="card">
-          <h4>有 session</h4>
+          <h4>With a session</h4>
           <p>
-            每一轮结束后把新消息 append 进 <code class="inline">.jsonl</code>。
-            下次 <code class="inline">--continue</code> 加载 → 同一串 history → 模型接着聊。
+            After each turn, new messages are appended to a <code class="inline">.jsonl</code> file.
+            Next time, <code class="inline">--continue</code> loads them → same history → the model picks up where you left off.
           </p>
         </div>
       </div>
       <div class="callout">
-        <strong>Session ≠ 向量数据库 / 长期记忆。</strong>
-        它就是「把 chat messages 序列化」。简单、可 diff、人眼能读——学习 harness 刚好够用。
+        <strong>Session ≠ vector DB / long-term memory.</strong>
+        It’s just “serialize chat messages.” Simple, diffable, human-readable — enough for learning a harness.
       </div>
     </section>
 
     <section id="where">
-      <h2><span class="num">02</span> 文件放哪</h2>
-      <pre class="tree"><span class="dir">你的项目/</span>
+      <h2><span class="num">02</span> Where the files live</h2>
+      <pre class="tree"><span class="dir">your-project/</span>
 ├── src/ ...
-└── <span class="dir">.mini-pi/</span>                 <span class="note"># gitignore 掉了</span>
+└── <span class="dir">.mini-pi/</span>                 <span class="note"># gitignored</span>
     └── <span class="dir">sessions/</span>
         ├── <span class="file">2026-07-11T23-09-37_e497cd.jsonl</span>
         └── <span class="file">2026-07-12T10-02-11_a1b2c3.jsonl</span></pre>
       <ul class="plain">
-        <li>默认目录：<code class="inline">&lt;cwd&gt;/.mini-pi/sessions/</code>（跟项目走）</li>
-        <li>文件名：时间戳 + 短随机串，当作 session id</li>
-        <li><code class="inline">--session-dir</code> 可改存放位置</li>
+        <li>Default dir: <code class="inline">&lt;cwd&gt;/.mini-pi/sessions/</code> (lives with the project)</li>
+        <li>Filename: timestamp + short random string, used as the session id</li>
+        <li><code class="inline">--session-dir</code> can change the location</li>
       </ul>
     </section>
 
     <section id="jsonl">
-      <h2><span class="num">03</span> JSONL 长什么样</h2>
+      <h2><span class="num">03</span> What JSONL looks like</h2>
       <p>
-        <strong>JSONL</strong> = JSON Lines：<strong>一行一个 JSON 对象</strong>，用换行分隔。
-        适合「只往末尾追加」，崩溃了也不容易整文件写坏。
+        <strong>JSONL</strong> = JSON Lines: <strong>one JSON object per line</strong>, separated by newlines.
+        Great for append-only writes — a crash is unlikely to corrupt the whole file.
       </p>
-      <pre><span class="c">// 第 1 行永远是 meta（会话名片）</span>
+      <pre><span class="c">// Line 1 is always meta (session card)</span>
 {<span class="s">"type"</span>:<span class="s">"meta"</span>, <span class="s">"id"</span>:<span class="s">"2026-..."</span>, <span class="s">"title"</span>:<span class="s">"create hello.ts"</span>, ...}
 
-<span class="c">// 之后每一行是一条 message（和 API 里的 role 一致）</span>
+<span class="c">// Every line after is a message (same roles as the API)</span>
 {<span class="s">"type"</span>:<span class="s">"message"</span>, <span class="s">"ts"</span>:<span class="s">"..."</span>, <span class="s">"message"</span>:{ <span class="s">"role"</span>:<span class="s">"user"</span>, <span class="s">"content"</span>:<span class="s">"..."</span> }}
 {<span class="s">"type"</span>:<span class="s">"message"</span>, <span class="s">"ts"</span>:<span class="s">"..."</span>, <span class="s">"message"</span>:{ <span class="s">"role"</span>:<span class="s">"assistant"</span>, <span class="s">"content"</span>:<span class="s">"..."</span>, <span class="s">"tool_calls"</span>:[...] }}
 {<span class="s">"type"</span>:<span class="s">"message"</span>, <span class="s">"ts"</span>:<span class="s">"..."</span>, <span class="s">"message"</span>:{ <span class="s">"role"</span>:<span class="s">"tool"</span>, <span class="s">"tool_call_id"</span>:<span class="s">"..."</span>, <span class="s">"content"</span>:<span class="s">"..."</span> }}</pre>
 
       <div class="grid-2">
         <div class="card">
-          <h4>会存什么</h4>
-          <p>user / assistant（含 tool_calls）/ tool 结果。这些是模型下一轮要看见的上下文。</p>
+          <h4>What gets stored</h4>
+          <p>user / assistant (including tool_calls) / tool results. That’s the context the model needs on the next turn.</p>
         </div>
         <div class="card">
-          <h4>不存什么</h4>
+          <h4>What doesn’t</h4>
           <p>
-            <strong>system prompt 不进文件</strong>——每次启动按当前 cwd 重新生成。
-            换目录、改 prompt 逻辑时更干净。
+            <strong>The system prompt is not written to the file</strong> — it’s regenerated on each start from the current cwd.
+            Cleaner when you change directories or prompt logic.
           </p>
         </div>
       </div>
     </section>
 
     <section id="loop">
-      <h2><span class="num">04</span> 和 Agent Loop 怎么接</h2>
-      <p>Session 不改变 loop，只包在外面：</p>
+      <h2><span class="num">04</span> How it hooks into the agent loop</h2>
+      <p>Session does not change the loop — it wraps around it:</p>
       <div class="flow" id="flow">
         <div class="flow-step active" data-i="0">
           <div class="rail"><div class="dot">1</div><div class="line"></div></div>
           <div class="body">
-            <h4>打开 / 创建 session</h4>
-            <p>新会话写一行 meta；<code class="inline">--continue</code> 则 load JSONL → <code class="inline">history[]</code></p>
+            <h4>Open / create session</h4>
+            <p>New session writes one meta line; <code class="inline">--continue</code> loads JSONL → <code class="inline">history[]</code></p>
           </div>
         </div>
         <div class="flow-step" data-i="1">
           <div class="rail"><div class="dot">2</div><div class="line"></div></div>
           <div class="body">
             <h4>runAgent(prompt, history)</h4>
-            <p>内部：system + history + user → 模型 → 工具… 返回<strong>完整</strong>非 system 消息列表</p>
+            <p>Inside: system + history + user → model → tools… returns the <strong>full</strong> non-system message list</p>
           </div>
         </div>
         <div class="flow-step" data-i="2">
           <div class="rail"><div class="dot">3</div><div class="line"></div></div>
           <div class="body">
             <h4>syncFromHistory(newHistory)</h4>
-            <p>对比旧长度，把<strong>新增的尾巴</strong> append 进 jsonl（不是整文件重写每条）</p>
+            <p>Compare lengths; append only the <strong>new tail</strong> into the jsonl (not a full rewrite of every line)</p>
           </div>
         </div>
         <div class="flow-step" data-i="3">
           <div class="rail"><div class="dot">4</div><div class="line"></div></div>
           <div class="body">
-            <h4>下一轮 / 退出</h4>
-            <p>内存里 history 继续用；进程挂了也没关系——磁盘上已有完整记录</p>
+            <h4>Next turn / exit</h4>
+            <p>In-memory history keeps going; if the process dies, disk already has the full record</p>
           </div>
         </div>
       </div>
       <div class="demo-controls" style="margin-top:0">
-        <button type="button" id="flow-next" class="primary">高亮下一步</button>
-        <button type="button" id="flow-reset">重置</button>
+        <button type="button" id="flow-next" class="primary">Highlight next</button>
+        <button type="button" id="flow-reset">Reset</button>
       </div>
 
-      <h3>核心代码心智</h3>
-      <pre><span class="c">// 启动</span>
-<span class="k">let</span> session = Session.<span class="f">create</span>(...)  <span class="c">// 或 Session.load(...)</span>
-<span class="k">let</span> history = session.history       <span class="c">// [] 或上次的 messages</span>
+      <h3>Core mental model</h3>
+      <pre><span class="c">// Startup</span>
+<span class="k">let</span> session = Session.<span class="f">create</span>(...)  <span class="c">// or Session.load(...)</span>
+<span class="k">let</span> history = session.history       <span class="c">// [] or previous messages</span>
 
-<span class="c">// 每一轮用户输入之后</span>
+<span class="c">// After each user turn</span>
 history = <span class="k">await</span> <span class="f">runAgent</span>(opts, userText, history)
-session.<span class="f">syncFromHistory</span>(history)   <span class="c">// 只把新消息 append 到磁盘</span></pre>
+session.<span class="f">syncFromHistory</span>(history)   <span class="c">// append only new messages to disk</span></pre>
       <div class="callout">
-        <strong>为什么只 append 尾巴？</strong>
-        <code class="inline">runAgent</code> 返回的是「整段对话」；session 记得自己已经有 N 条，
-        只把 <code class="inline">history.slice(N)</code> 写成新行。这样 JSONL 保持追加写，简单可靠。
+        <strong>Why only append the tail?</strong>
+        <code class="inline">runAgent</code> returns the full conversation; the session already knows it has N messages,
+        so it only writes <code class="inline">history.slice(N)</code> as new lines. JSONL stays append-only — simple and reliable.
       </div>
     </section>
 
     <section id="demo">
-      <h2><span class="num">05</span> 交互演示：文件怎么长出来</h2>
-      <p>模拟一轮「create hello.ts」：看 jsonl 从只有 meta，到 user → assistant(tool) → tool → assistant。</p>
+      <h2><span class="num">05</span> Interactive demo: how the file grows</h2>
+      <p>Simulate one “create hello.ts” turn: watch the jsonl grow from meta only, to user → assistant(tool) → tool → assistant.</p>
       <div class="demo">
         <div class="demo-meta">
           <span>step: <strong id="demo-step">0</strong></span>
@@ -438,110 +438,111 @@ session.<span class="f">syncFromHistory</span>(history)   <span class="c">// 只
             <span id="demo-fname">.mini-pi/sessions/demo.jsonl</span>
           </div>
           <div class="jsonl-body" id="demo-body">
-            <div class="jsonl-empty">点「播放」或「单步」开始写入…</div>
+            <div class="jsonl-empty">Click Play or Step to start writing…</div>
           </div>
         </div>
         <div class="demo-controls">
-          <button type="button" class="primary" id="demo-play">▶ 播放</button>
-          <button type="button" id="demo-step-btn">单步</button>
-          <button type="button" id="demo-reset">重置</button>
+          <button type="button" class="primary" id="demo-play">▶ Play</button>
+          <button type="button" id="demo-step-btn">Step</button>
+          <button type="button" id="demo-reset">Reset</button>
         </div>
       </div>
     </section>
 
     <section id="cli">
-      <h2><span class="num">06</span> 命令怎么映射到原理</h2>
+      <h2><span class="num">06</span> How commands map to the mechanism</h2>
       <table>
         <thead>
-          <tr><th>命令</th><th>磁盘上发生什么</th></tr>
+          <tr><th>Command</th><th>What happens on disk</th></tr>
         </thead>
         <tbody>
           <tr>
-            <td>默认启动</td>
-            <td>create 新文件，写一行 meta</td>
+            <td>Default start</td>
+            <td>create a new file, write one meta line</td>
           </tr>
           <tr>
             <td><code class="inline">--continue</code> / <code class="inline">-c</code></td>
-            <td>按 updatedAt 找最新 jsonl，load 全部 message 行</td>
+            <td>find the latest jsonl by updatedAt, load all message lines</td>
           </tr>
           <tr>
             <td><code class="inline">--resume</code></td>
-            <td>列出 sessions，你选一个再 load</td>
+            <td>list sessions; you pick one, then load</td>
           </tr>
           <tr>
             <td><code class="inline">--session id</code></td>
-            <td>按 id / 部分 id / 路径 resolve 后 load</td>
+            <td>resolve by id / partial id / path, then load</td>
           </tr>
           <tr>
             <td><code class="inline">--list-sessions</code></td>
-            <td>读每个文件的 meta + 数 message 行</td>
+            <td>read each file’s meta + count message lines</td>
           </tr>
           <tr>
             <td><code class="inline">--no-session</code></td>
-            <td>不创建、不读写文件（纯内存）</td>
+            <td>no create, no read/write (memory only)</td>
           </tr>
           <tr>
             <td>REPL <code class="inline">/reset</code></td>
-            <td><strong>新建</strong>另一个 jsonl（旧文件保留）</td>
+            <td><strong>create</strong> another jsonl (old file is kept)</td>
           </tr>
           <tr>
             <td>REPL <code class="inline">/session</code></td>
-            <td>打印当前 id 与路径（不改文件）</td>
+            <td>print current id and path (does not change the file)</td>
           </tr>
         </tbody>
       </table>
-      <pre><span class="c"># 新开一轮并保存</span>
+      <pre><span class="c"># Start a new turn and save it</span>
 npm run dev -- -p <span class="s">"create hello.ts"</span>
 
-<span class="c"># 接着聊</span>
-npm run dev -- -c -p <span class="s">"再加个 test"</span>
+<span class="c"># Continue the chat</span>
+npm run dev -- -c -p <span class="s">"add a test"</span>
 
-<span class="c"># 看看有哪些会话</span>
+<span class="c"># List existing sessions</span>
 npm run dev -- --list-sessions</pre>
     </section>
 
     <section id="pitfalls">
-      <h2><span class="num">07</span> 容易误解的点</h2>
+      <h2><span class="num">07</span> Easy misconceptions</h2>
       <table>
         <thead>
-          <tr><th>误解</th><th>实际</th></tr>
+          <tr><th>Misconception</th><th>Reality</th></tr>
         </thead>
         <tbody>
           <tr>
-            <td>Session 会记住所有项目文件</td>
-            <td>只记对话消息；读代码仍靠 read/bash 工具</td>
+            <td>Session remembers every project file</td>
+            <td>Only chat messages; reading code still uses the read/bash tools</td>
           </tr>
           <tr>
-            <td>/reset 会删历史文件</td>
-            <td>只是换新文件；旧 jsonl 还在目录里</td>
+            <td>/reset deletes history files</td>
+            <td>It just switches to a new file; old jsonl stays in the directory</td>
           </tr>
           <tr>
-            <td>续聊 = 同一个模型请求一直开着</td>
-            <td>每次都是新的 API 调用，只是 messages 更长</td>
+            <td>Continue = one long-lived model request</td>
+            <td>Each turn is a new API call — messages are just longer</td>
           </tr>
           <tr>
-            <td>meta 里的 model 会强制用旧模型</td>
-            <td>目前只作记录；真正用的是你当前 env 的 MODEL</td>
+            <td>meta.model forces the old model</td>
+            <td>Currently just recorded; the live MODEL env wins</td>
           </tr>
           <tr>
-            <td>和 Pi 的 session 树一样</td>
-            <td>我们是<strong>线性</strong> JSONL，没有 branch/fork（有意简化）</td>
+            <td>Same as Pi’s session tree</td>
+            <td>Ours is a <strong>linear</strong> JSONL — no branch/fork (intentionally simplified)</td>
           </tr>
         </tbody>
       </table>
       <div class="callout">
-        <strong>一句话：</strong>Session = <code class="inline">messages[]</code> 的磁盘镜像。
-        Agent loop 仍然是主角；session 只是让 loop 的输入能活过进程生命周期。
+        <strong>In one line:</strong> Session = a disk mirror of <code class="inline">messages[]</code>.
+        The agent loop is still the star; session only lets the loop’s input outlive the process.
       </div>
     </section>
 
     <footer>
       <span>
-        <a href="./index.html">← 总览</a> ·
+        <a href="./index.html">← Overview</a> ·
         <a href="./streaming.html">Streaming</a> ·
-        <a href="./agents.html">AGENTS.md</a>
+        <a href="./agents.html">AGENTS.md</a> ·
+        <a href="./compact.html">Compaction</a>
       </span>
-      <span>mini-pi · MIT · 仅供学习</span>
+      <span>mini-pi · MIT · for learning</span>
     </footer>
   </div>
 
@@ -609,7 +610,7 @@ npm run dev -- --list-sessions</pre>
 
       function render(flashIdx) {
         if (lines.length === 0) {
-          body.innerHTML = '<div class="jsonl-empty">点「播放」或「单步」开始写入…</div>';
+          body.innerHTML = '<div class="jsonl-empty">Click Play or Step to start writing…</div>';
         } else {
           body.innerHTML = lines
             .map(

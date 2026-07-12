@@ -1,10 +1,10 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Compaction 原理 · mini-pi</title>
-  <meta name="description" content="讲解 coding agent 如何在上下文将满时压缩旧对话" />
+  <title>Compaction · mini-pi</title>
+  <meta name="description" content="How a coding agent compresses older turns when the context window is nearly full" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
@@ -257,156 +257,155 @@
       <div class="inner">
         <a class="brand" href="./index.html">mini-<span>pi</span> · compact</a>
         <div class="links">
-          <a href="./index.html">总览</a>
+          <a href="./index.html">Overview</a>
           <a href="./streaming.html">Streaming</a>
           <a href="./sessions.html">Sessions</a>
           <a href="./agents.html">AGENTS.md</a>
-          <a href="#why">为什么</a>
-          <a href="#source">源码</a>
-          <a href="#example">例子</a>
-          <a href="#demo">演示</a>
-          <a href="#cli">命令</a>
+          <a href="#why">Why</a>
+          <a href="#source">Source</a>
+          <a href="#example">Example</a>
+          <a href="#demo">Demo</a>
+          <a href="#cli">CLI</a>
+          <a href="../compact.html">中文</a>
           <a href="https://github.com/giggling-ginger/mini-pi" target="_blank" rel="noopener">GitHub ↗</a>
-          <a href="./en/compact.html">EN</a>
-          <a href="./compact.html">中文</a>
         </div>
       </div>
     </nav>
 
     <header class="hero">
       <div class="badge">Compaction · Context window</div>
-      <h1>对话太长时<br />怎么把旧轮次 <em>折起来</em></h1>
+      <h1>When the chat gets long<br />how we <em>fold</em> older turns</h1>
       <p class="lead">
-        模型上下文有限。Session 会越聊越长，tool 输出尤其占地方。
-        Compaction = 把<strong>较早的消息</strong>收成一段摘要，留下<strong>最近几轮原文</strong>，再继续 loop。
+        Model context is finite. Sessions grow turn by turn; tool output is especially expensive.
+        Compaction = fold <strong>earlier messages</strong> into a summary, keep the <strong>recent turns verbatim</strong>, then continue the loop.
       </p>
       <p class="lead" style="font-size:0.95rem">
-        源码：<code class="inline">src/compact.ts</code>（在 <code class="inline">runAgent</code> 开头调用）
+        Source: <code class="inline">src/compact.ts</code> (called at the start of <code class="inline">runAgent</code>)
       </p>
     </header>
 
     <section id="why">
-      <h2><span class="num">01</span> 为什么需要</h2>
+      <h2><span class="num">01</span> Why it matters</h2>
       <div class="grid-2">
         <div class="card">
-          <h4>不压</h4>
+          <h4>Without compaction</h4>
           <p>
-            messages 无限增长 → 触及模型上限 → 请求失败，或费用暴涨、模型「忘了」早期目标却仍付全价。
+            messages grow without bound → hit the model limit → requests fail, or cost explodes while the model “forgets” early goals and you still pay full price.
           </p>
         </div>
         <div class="card">
-          <h4>压</h4>
+          <h4>With compaction</h4>
           <p>
-            旧轮次变成摘要；近期细节保留。Agent 仍知道「我们在做什么」，但 token 用量掉下来。
+            Older turns become a summary; recent detail stays. The agent still knows “what we’re doing,” but token usage drops.
           </p>
         </div>
       </div>
       <div class="callout">
-        <strong>和 Session / AGENTS.md 的分工：</strong>
-        Session 负责持久化；AGENTS.md 是项目说明书；Compaction 负责<strong>历史别撑爆窗口</strong>。
-        三者正交。
+        <strong>How this splits with Session / AGENTS.md:</strong>
+        Session owns persistence; AGENTS.md is project instructions; Compaction keeps <strong>history from blowing the window</strong>.
+        The three are orthogonal.
       </div>
     </section>
 
     <section id="how">
-      <h2><span class="num">02</span> 先建立心智模型</h2>
+      <h2><span class="num">02</span> Mental model first</h2>
       <p>
-        发给模型的永远是一串 <code class="inline">messages[]</code>。
-        Compaction <strong>不改 agent loop</strong>，只在 loop 开始前把这串数组变短。
+        What the model always sees is a <code class="inline">messages[]</code> array.
+        Compaction <strong>does not change the agent loop</strong>—it only shortens that array before the loop starts.
       </p>
-      <pre><span class="c">// 压缩前（很长）</span>
+      <pre><span class="c">// before (long)</span>
 [ u1, a1, t1, u2, a2, t2, … u20, a20, t20 ]
 
-<span class="c">// 压缩后（短）</span>
-[ summaryUser, ackAssistant,  …最近几条原文… ]
-     ↑ 旧的一大坨变成这两条                  ↑ 细节还在</pre>
+<span class="c">// after (short)</span>
+[ summaryUser, ackAssistant,  …recent verbatim turns… ]
+     ↑ the big old blob becomes these two          ↑ detail kept</pre>
       <div class="callout">
-        <strong>类比：</strong>写小说大纲。
-        前 15 章压成一段「前情提要」，最近 2 章全文保留——续写时既不丢主线，也不把全书贴进编辑器。
+        <strong>Analogy:</strong> writing a novel outline.
+        Chapters 1–15 collapse into a “previously on…” blurb; the last 2 chapters stay in full—so the next chapter keeps the plot without pasting the whole book into the editor.
       </div>
     </section>
 
     <section id="source">
-      <h2><span class="num">03</span> 源码逐步对照</h2>
-      <p>文件：<code class="inline">src/compact.ts</code> + <code class="inline">src/agent.ts</code>。按调用顺序读。</p>
+      <h2><span class="num">03</span> Source walkthrough</h2>
+      <p>Files: <code class="inline">src/compact.ts</code> + <code class="inline">src/agent.ts</code>. Read in call order.</p>
 
-      <h3>入口：谁在什么时候调用？</h3>
+      <h3>Entry: who calls it, and when?</h3>
       <p>
-        每次 <code class="inline">runAgent(prompt, history)</code>，在拼本轮消息<strong>之前</strong>：
+        Every <code class="inline">runAgent(prompt, history)</code>, <strong>before</strong> assembling this turn’s messages:
       </p>
-      <pre><span class="c">// agent.ts — runAgent 开头</span>
+      <pre><span class="c">// agent.ts — start of runAgent</span>
 <span class="k">let</span> hist = history.<span class="f">filter</span>(m =&gt; m.role !== <span class="s">"system"</span>)
 
 <span class="k">if</span> (compact) {
   <span class="k">const</span> result = <span class="k">await</span> <span class="f">maybeCompact</span>(client, model, hist, compactOptions)
-  hist = result.history   <span class="c">// 可能已被换成「摘要 + 近期」</span>
+  hist = result.history   <span class="c">// may now be “summary + recent”</span>
   <span class="k">if</span> (result.compacted) onEvent({ type: <span class="s">"compact"</span>, ... })
 }
 
-<span class="c">// 然后再进正常 loop</span>
-messages = [ system, ...hist, 本轮 user ]</pre>
+<span class="c">// then enter the normal loop</span>
+messages = [ system, ...hist, thisTurnUser ]</pre>
       <p>
-        所以：压缩发生在「你刚输入、模型还没开始想」的那一刻。
-        本轮 user 还没加进去，只压<strong>历史</strong>。
+        So compaction runs the moment “you just typed, the model has not started thinking yet.”
+        This turn’s user message is not included yet—only <strong>history</strong> is compacted.
       </p>
 
-      <h3>步骤 A — 要不要压？（估 token）</h3>
+      <h3>Step A — Should we compact? (estimate tokens)</h3>
       <pre><span class="c">// compact.ts</span>
 <span class="k">function</span> <span class="f">estimateTokens</span>(messages) {
-  <span class="c">// 把每条 message 的文字、tool 参数字符数加起来</span>
-  <span class="k">return</span> Math.<span class="f">ceil</span>(总字符数 / <span class="n">4</span>)
+  <span class="c">// sum chars from each message text + tool args</span>
+  <span class="k">return</span> Math.<span class="f">ceil</span>(totalChars / <span class="n">4</span>)
 }
 
-<span class="c">// maybeCompact 里：</span>
-<span class="k">if</span> (!force &amp;&amp; beforeTokens &lt; threshold)  <span class="c">// 默认 threshold=8000</span>
-  <span class="k">return</span> { compacted: <span class="k">false</span>, history: 原样 }  <span class="c">// 不压，直接走</span></pre>
+<span class="c">// inside maybeCompact:</span>
+<span class="k">if</span> (!force &amp;&amp; beforeTokens &lt; threshold)  <span class="c">// default threshold=8000</span>
+  <span class="k">return</span> { compacted: <span class="k">false</span>, history: unchanged }  <span class="c">// skip, pass through</span></pre>
       <p>
-        <code class="inline">/4</code> 是粗算（英文大约 1 token ≈ 4 字符）。
-        我们只要「差不多到上限了吗」，不要计费级精度。
+        <code class="inline">/4</code> is a rough estimate (English ≈ 1 token per 4 chars).
+        We only need “are we roughly near the limit?”—not billing-grade accuracy.
       </p>
 
-      <h3>步骤 B — 从哪切开？<code class="inline">splitOldRecent</code></h3>
-      <p>目标：尾部留约 <code class="inline">keepRecent</code>（默认 3000）token 的 <strong>recent</strong>，前面全是 <strong>old</strong>。</p>
-      <pre><span class="c">// 从数组末尾往前扫，累加 token，直到预算用完</span>
-<span class="k">for</span> (i = 最后一条; i &gt;= 0; i--) {
-  <span class="k">if</span> (再加这条会超过 keepRecent &amp;&amp; 已经有 recent)
+      <h3>Step B — Where to cut? <code class="inline">splitOldRecent</code></h3>
+      <p>Goal: keep about <code class="inline">keepRecent</code> (default 3000) tokens of <strong>recent</strong> at the tail; everything before is <strong>old</strong>.</p>
+      <pre><span class="c">// scan backward from the end, accumulate tokens until budget is used</span>
+<span class="k">for</span> (i = lastMessage; i &gt;= 0; i--) {
+  <span class="k">if</span> (addingThisWouldExceed keepRecent &amp;&amp; recent already has items)
     <span class="k">break</span>
-  tokenBudget += 这条
-  idx = i   <span class="c">// recent 从 idx 开始</span>
+  tokenBudget += thisMessage
+  idx = i   <span class="c">// recent starts at idx</span>
 }
 
-<span class="c">// 关键：把 idx 往右滑到最近的 user，避免从 tool 中间切开</span>
+<span class="c">// important: slide idx right to the nearest user so we don’t cut mid-tool</span>
 <span class="k">while</span> (messages[idx].role !== <span class="s">"user"</span>) idx++</pre>
-      <p>举例（箭头 = 切开位置）：</p>
+      <p>Example (arrow = cut point):</p>
       <pre>u1 a1 t1 | u2 a2 t2 u3 a3
   old    ↑      recent
-         必须落在 user 上
+         must land on a user
 
-<span class="c">// 错误切法（会炸）：</span>
-u1 a1 | t1 u2 …     <span class="c">// t1 需要前面的 a1.tool_calls，API 拒绝</span></pre>
+<span class="c">// bad cut (will break):</span>
+u1 a1 | t1 u2 …     <span class="c">// t1 needs preceding a1.tool_calls; API rejects</span></pre>
 
-      <h3>步骤 C — 把 old 变成短摘要</h3>
-      <p>两条路：</p>
+      <h3>Step C — Turn old into a short summary</h3>
+      <p>Two paths:</p>
       <div class="grid-2">
         <div class="card">
-          <h4>llmSummary（默认）</h4>
+          <h4>llmSummary (default)</h4>
           <p>
-            把 old 打成纯文本 transcript，再单独调一次
-            <code class="inline">chat.completions</code>（<strong>不带 tools</strong>），
-            请模型写 bullet 摘要：目标、改过的文件、命令、错误、当前状态。
+            Flatten old into a plain-text transcript, then call
+            <code class="inline">chat.completions</code> once more (<strong>no tools</strong>),
+            asking the model for a bullet summary: goals, files touched, commands, errors, current state.
           </p>
         </div>
         <div class="card">
-          <h4>localSummary（测试/离线）</h4>
+          <h4>localSummary (tests / offline)</h4>
           <p>
-            不调 API：每条 user/assistant/tool 截一行 bullet。
-            粗糙但零成本，方便单测。
+            No API: one truncated bullet per user/assistant/tool message.
+            Crude but free—handy for unit tests.
           </p>
         </div>
       </div>
 
-      <h3>步骤 D — 拼回新 history</h3>
-      <pre><span class="c">// maybeCompact 末尾</span>
+      <h3>Step D — Rebuild history</h3>
+      <pre><span class="c">// end of maybeCompact</span>
 folded = [
   {
     role: <span class="s">"user"</span>,
@@ -416,84 +415,84 @@ folded = [
     role: <span class="s">"assistant"</span>,
     content: <span class="s">"Understood. I have the summarized context…"</span>
   },
-  ...recent   <span class="c">// 近期原文，一字不改</span>
+  ...recent   <span class="c">// recent turns, byte-for-byte</span>
 ]
 <span class="k">return</span> { history: folded, compacted: <span class="k">true</span>, beforeTokens, afterTokens, ... }</pre>
       <p>
-        为什么要一对 user+assistant，而不是只塞一条 system？
-        因为 history 里我们<strong>从不持久化 system</strong>（system 每次现拼）；
-        用 user/assistant 对能自然躺在 session JSONL 里，续聊时也能 load 回来。
+        Why a user+assistant pair instead of a single system message?
+        Because we <strong>never persist system</strong> in history (system is rebuilt each turn);
+        a user/assistant pair sits naturally in the session JSONL and reloads cleanly when you resume.
       </p>
 
-      <h3>步骤 E — 写回 session</h3>
+      <h3>Step E — Write back to the session</h3>
       <p>
-        压缩后数组<strong>前缀变了</strong>（不是简单 append），所以
-        <code class="inline">session.syncFromHistory</code> 会<strong>整文件 rewrite</strong> JSONL，
-        而不是只在末尾加行。
+        After compaction the array <strong>prefix changes</strong> (not a simple append), so
+        <code class="inline">session.syncFromHistory</code> does a <strong>full-file rewrite</strong> of the JSONL,
+        not just append lines at the end.
       </p>
     </section>
 
     <section id="example">
-      <h2><span class="num">04</span> 一个完整数字例子</h2>
-      <p>假设 threshold=100，keepRecent=40（数字缩小便于想）。</p>
-      <pre><span class="c">// 压缩前 history（估 150 tok）</span>
-0 user:       创建 app
-1 assistant:  写 package.json  (tool write)
+      <h2><span class="num">04</span> A full numeric example</h2>
+      <p>Assume threshold=100, keepRecent=40 (scaled down so the numbers are easy).</p>
+      <pre><span class="c">// history before (≈150 tok)</span>
+0 user:       create app
+1 assistant:  write package.json  (tool write)
 2 tool:       Wrote …
-3 user:       加路由
-4 assistant:  改了 router.ts
+3 user:       add routes
+4 assistant:  edited router.ts
 5 tool:       …
-… （中间很多）
-18 user:      修测试
-19 assistant: 跑 vitest
+… (lots in the middle)
+18 user:      fix tests
+19 assistant: run vitest
 20 tool:      3 failed …
 
-<span class="c">// split：从末尾攒 ~40 tok → 落在某条 user，比如 index 16</span>
-old    = [0 .. 15]     <span class="c">// 将被折叠</span>
-recent = [16 .. 20]    <span class="c">// 原文保留</span>
+<span class="c">// split: accumulate ~40 tok from the end → land on a user, e.g. index 16</span>
+old    = [0 .. 15]     <span class="c">// will be folded</span>
+recent = [16 .. 20]    <span class="c">// kept verbatim</span>
 
-<span class="c">// llm 摘要 old → 一段 bullets</span>
-summary = "- 建了 app 与路由\n- 改了 router.ts\n- 测试仍有失败…"
+<span class="c">// llm summarizes old → a few bullets</span>
+summary = "- built app and routes\n- edited router.ts\n- tests still failing…"
 
-<span class="c">// 压缩后 history（估 ~55 tok）</span>
+<span class="c">// history after (≈55 tok)</span>
 0 user:      [Conversation summary…] + summary
 1 assistant: Understood…
-2 user:      修测试          <span class="c">// 原 18</span>
-3 assistant: 跑 vitest
+2 user:      fix tests          <span class="c">// was 18</span>
+3 assistant: run vitest
 4 tool:      3 failed …</pre>
       <p>
-        之后你再说「继续修」，模型看到的是：摘要里的「测试在挂」+ 最近 vitest 输出原文。
-        它<strong>丢了</strong>中间某次无关的闲聊细节，但<strong>保留了</strong>刚发生的错误日志。
+        When you later say “keep fixing,” the model sees: “tests are failing” from the summary + the recent vitest output verbatim.
+        It <strong>loses</strong> some unrelated mid-chat chatter, but <strong>keeps</strong> the error log that just happened.
       </p>
     </section>
 
     <section id="algo">
-      <h2><span class="num">05</span> 算法流程（对照函数）</h2>
+      <h2><span class="num">05</span> Algorithm flow (by function)</h2>
       <pre>runAgent()
   │
-  ├─ estimateTokens(history)          <span class="c">// A 估大小</span>
-  │     └─ &lt; threshold? → 不压，返回原 history
+  ├─ estimateTokens(history)          <span class="c">// A estimate size</span>
+  │     └─ &lt; threshold? → no compact, return original history
   │
-  ├─ splitOldRecent(history, keep)    <span class="c">// B 切开</span>
-  │     ├─ 从尾部累加 token
-  │     └─ 对齐到 user 边界
+  ├─ splitOldRecent(history, keep)    <span class="c">// B split</span>
+  │     ├─ accumulate tokens from the tail
+  │     └─ align to a user boundary
   │
-  ├─ llmSummary(old) 或 localSummary  <span class="c">// C 有损压缩</span>
+  ├─ llmSummary(old) or localSummary  <span class="c">// C lossy compress</span>
   │
-  ├─ folded = [summaryUser, ack, ...recent]  <span class="c">// D 重组</span>
+  ├─ folded = [summaryUser, ack, ...recent]  <span class="c">// D rebuild</span>
   │
-  └─ messages = [system, ...folded, 新user]
-        → 正常 tool loop…</pre>
+  └─ messages = [system, ...folded, newUser]
+        → normal tool loop…</pre>
       <div class="callout">
-        <strong>关键：这是有损压缩。</strong>
-        不像 zip，不能还原原文。换的是上下文空间；代价是可能丢掉旧细节。
-        所以 keepRecent 别太小——最近几轮（尤其 tool 输出）通常最重要。
+        <strong>Key: this is lossy compression.</strong>
+        Unlike zip, you cannot restore the original text. You trade context space for possible loss of older detail.
+        So don’t set keepRecent too small—the last few turns (especially tool output) usually matter most.
       </div>
     </section>
 
     <section id="demo">
-      <h2><span class="num">06</span> 交互演示</h2>
-      <p>点「灌满历史」模拟变长，越过阈值后自动压缩（示意，非真 API）。</p>
+      <h2><span class="num">06</span> Interactive demo</h2>
+      <p>Click “Add a turn” to grow history; once past the threshold it auto-compacts (illustrative, not a real API).</p>
       <div class="meter-wrap">
         <div class="meter-label">
           <span>context usage (estimate)</span>
@@ -509,90 +508,91 @@ summary = "- 建了 app 与路由\n- 改了 router.ts\n- 测试仍有失败…"
         </div>
         <div class="msg-demo" id="msg-list"></div>
         <div class="demo-controls">
-          <button type="button" class="primary" id="btn-grow">+ 加一轮对话</button>
-          <button type="button" id="btn-compact">强制压缩</button>
-          <button type="button" id="btn-reset">重置</button>
+          <button type="button" class="primary" id="btn-grow">+ Add a turn</button>
+          <button type="button" id="btn-compact">Force compact</button>
+          <button type="button" id="btn-reset">Reset</button>
         </div>
       </div>
     </section>
 
     <section id="cli">
-      <h2><span class="num">07</span> 命令</h2>
+      <h2><span class="num">07</span> Commands</h2>
       <table>
         <thead>
-          <tr><th>命令</th><th>作用</th></tr>
+          <tr><th>Command</th><th>Effect</th></tr>
         </thead>
         <tbody>
           <tr>
-            <td>（默认）</td>
-            <td>每轮 runAgent 前检查是否需要 compact</td>
+            <td>(default)</td>
+            <td>Before each runAgent, check whether compact is needed</td>
           </tr>
           <tr>
             <td><code class="inline">--no-compact</code></td>
-            <td>关闭</td>
+            <td>Disable</td>
           </tr>
           <tr>
             <td><code class="inline">--compact-threshold N</code></td>
-            <td>触发阈值（估 token）</td>
+            <td>Trigger threshold (estimated tokens)</td>
           </tr>
           <tr>
             <td><code class="inline">--compact-keep N</code></td>
-            <td>保留的 recent 体量</td>
+            <td>How much recent mass to keep</td>
           </tr>
           <tr>
             <td><code class="inline">/tokens</code></td>
-            <td>看当前 history 估多少 token</td>
+            <td>Show estimated tokens for current history</td>
           </tr>
           <tr>
             <td><code class="inline">/compact</code></td>
-            <td>立刻强制压一轮并写回 session</td>
+            <td>Force one compact pass and write the session</td>
           </tr>
         </tbody>
       </table>
       <pre>npm run dev -- --compact-threshold 4000 -c
-<span class="c"># REPL 里</span>
+<span class="c"># in the REPL</span>
 /tokens
 /compact</pre>
     </section>
 
     <section id="pitfalls">
-      <h2><span class="num">08</span> 常见坑</h2>
+      <h2><span class="num">08</span> Common pitfalls</h2>
       <table>
         <thead>
-          <tr><th>坑</th><th>说明</th></tr>
+          <tr><th>Pitfall</th><th>Notes</th></tr>
         </thead>
         <tbody>
           <tr>
-            <td>摘要丢关键细节</td>
-            <td>keepRecent 太小会丢近期代码；可调大 keep</td>
+            <td>Summary drops key detail</td>
+            <td>keepRecent too small loses recent code; raise keep</td>
           </tr>
           <tr>
-            <td>估 token 不准</td>
-            <td>chars/4 是粗算；够做触发器用，不是计费精度</td>
+            <td>Token estimate is rough</td>
+            <td>chars/4 is approximate; fine as a trigger, not for billing</td>
           </tr>
           <tr>
-            <td>session 文件</td>
-            <td>压缩后 history 前缀变了 → mini-pi 整文件 rewrite JSONL</td>
+            <td>Session file</td>
+            <td>After compact the history prefix changes → mini-pi rewrites the whole JSONL</td>
           </tr>
           <tr>
-            <td>二次压缩</td>
-            <td>摘要还在，后面又变长会再压；旧摘要可能再被折进更新的摘要</td>
+            <td>Re-compaction</td>
+            <td>The summary stays; later growth can compact again; old summaries may fold into a newer one</td>
           </tr>
         </tbody>
       </table>
       <div class="callout">
-        <strong>一句话：</strong>Compaction = 有损压缩对话历史。
-        换空间（上下文窗口）与精度（细节）——和 zip 不同，解压不回原文。
+        <strong>One-liner:</strong> Compaction = lossy compression of conversation history.
+        Trade space (context window) for precision (detail)—unlike zip, you cannot decompress back to the original.
       </div>
     </section>
 
     <footer>
       <span>
-        <a href="./index.html">← 总览</a> ·
+        <a href="./index.html">← Overview</a> ·
+        <a href="./streaming.html">Streaming</a> ·
         <a href="./sessions.html">Sessions</a> ·
         <a href="./agents.html">AGENTS.md</a>
       </span>
-      <span>mini-pi · MIT · 仅供学习</span>
+      <span>mini-pi · MIT · for learning</span>
     </footer>
   </div>
 
